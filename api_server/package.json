@@ -1,6 +1,6 @@
 {
   "name": "nox-ai-api-server",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "NOX AI — API Server by WR Programação & Neurocode Web Systems",
   "main": "dist/server.js",
   "scripts": {
