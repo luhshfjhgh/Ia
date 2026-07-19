@@ -1,0 +1,29 @@
+# NOX AI v4.0 — Dependências Python Atualizadas
+# Instale com: pip install -r requirements.txt
+
+# ── Obrigatórias ──────────────────────────────
+requests>=2.31.0
+pygame-ce>=2.5.2
+pyfiglet>=1.0.2
+
+# ── Voz TTS (fala da Nox) ─────────────────────
+edge-tts>=6.1.9
+
+# ── Voz STT (Nox te ouve) ─────────────────────
+SpeechRecognition>=3.10.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+
+# ── Controle do sistema ───────────────────────
+psutil>=5.9.0
+pyperclip>=1.8.2
+pyautogui>=0.9.54
+pillow>=10.0.0
+
+# ── WhatsApp e Segurança ──────────────────────
+qrcode>=7.4.2
+cryptography>=42.0.0
+
+# ── Visao computacional (camera.py) ───────────────────────────────────
+opencv-python>=4.8.0
+ultralytics>=8.0.0

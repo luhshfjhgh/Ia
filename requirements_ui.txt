@@ -1,0 +1,8 @@
+# NOX AI — Dependências adicionais para interface gráfica (voice_ui.py)
+# Instale com: pip install -r requirements_ui.txt
+
+# Interface nativa (janela sem navegador)
+pywebview>=4.4
+
+# Câmera (botão VISION) — opcional
+opencv-python>=4.8.0

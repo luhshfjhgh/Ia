@@ -1,0 +1,128 @@
+╔══════════════════════════════════════════════════════════╗
+║   NOX AI — INTEGRAÇÃO WHATSAPP (whatsapp-web.js + QR)    ║
+╚══════════════════════════════════════════════════════════╝
+
+ARQUIVOS ADICIONADOS/MODIFICADOS NESTE PACOTE:
+  • nox_output/whatsapp_skill.py              (NOVO)
+  • nox_output/communication/whatsapp_bot.py  (atualizado)
+  • nox_output/voice_ui.py                    (atualizado)
+
+────────────────────────────────────────────────────────────
+COMO USAR
+────────────────────────────────────────────────────────────
+
+1) Instale as dependências Python (se ainda não tiver):
+     pip install -r requirements.txt
+     pip install -r requirements_ui.txt
+
+   (qrcode, pillow e pywebview já estão nessas listas)
+
+2) Tenha o Node.js 18+ instalado:
+     https://nodejs.org
+   O whatsapp_bot.py instala sozinho o pacote whatsapp-web.js
+   na primeira vez que você conectar (npm install automático).
+
+3) Rode normalmente:
+     python main.py
+
+4) Digite o comando:
+     /conversa
+   Isso abre a interface gráfica de voz (janela com microfone).
+
+5) Clique no botão VOICE (microfone) e fale com a NOX.
+
+────────────────────────────────────────────────────────────
+COMANDOS DE VOZ DISPONÍVEIS
+────────────────────────────────────────────────────────────
+
+ "conectar whatsapp"
+      → Abre o QR Code na própria janela gráfica (e no terminal).
+        Escaneie com WhatsApp > Aparelhos conectados > Conectar aparelho.
+
+ "desconectar whatsapp"
+      → Encerra a sessão.
+
+ "status do whatsapp"
+      → Informa se está conectado, conectando ou desconectado.
+
+ "ativar resposta automática"
+      → A NOX passa a responder AUTOMATICAMENTE qualquer pessoa
+        que te mandar mensagem no WhatsApp, usando a IA.
+
+ "desativar resposta automática"
+      → Para de responder automaticamente.
+
+ "manda para João bom dia, tudo bem?"
+   ou "envia para Maria que vou chegar atrasado"
+      → A NOX repete em voz alta o contato e a mensagem e PERGUNTA
+        confirmação. Diga "sim" para enviar ou "não" para cancelar.
+        (busca o contato por nome com correspondência aproximada)
+
+ "ler mensagens do whatsapp"
+      → A NOX fala quantas conversas têm mensagens não lidas e de quem.
+
+────────────────────────────────────────────────────────────
+MONITOR AUTOMÁTICO POR VOZ
+────────────────────────────────────────────────────────────
+
+Enquanto o microfone estiver ATIVO (botão VOICE ligado) e a
+resposta automática estiver DESLIGADA, toda nova mensagem que
+chegar no WhatsApp será lida em voz alta pela NOX automaticamente,
+por exemplo:
+
+   "Nova mensagem do WhatsApp de João: oi, tudo bem?"
+
+Se a resposta automática estiver LIGADA, a NOX responde
+silenciosamente em texto (não interrompe sua conversa por voz).
+
+────────────────────────────────────────────────────────────
+PAINEL DE MÓDULOS (botão grid/quadrado da toolbar)
+────────────────────────────────────────────────────────────
+
+Agora mostra também o status do WHATSAPP (conectado/desconectado)
+junto com STT, TTS, câmera, etc.
+
+────────────────────────────────────────────────────────────
+OBSERVAÇÕES IMPORTANTES
+────────────────────────────────────────────────────────────
+
+• A sessão do WhatsApp fica salva em:
+    nox_output/communication/whatsapp_session/
+  Então depois de escanear uma vez, não precisa escanear de novo
+  (a menos que você desconecte o aparelho pelo celular).
+
+• Nenhum código existente foi quebrado: tudo foi feito via imports
+  opcionais (try/except) e novos métodos, sem remover nada do
+  main.py, voice_ui.py original ou whatsapp_bot.py original.
+
+• Se o Node.js não estiver instalado, a NOX avisa por voz/texto
+  e te diz onde baixar.
+
+• IMPORTANTE — se você já tentou conectar ANTES desta versão e deu
+  erro "TimeoutError ... waiting for the WS endpoint URL", apague a
+  pasta abaixo antes de tentar de novo (ela tem uma instalação
+  incompleta do navegador):
+    nox_output/communication/node_modules/
+  Na próxima vez que pedir "conectar whatsapp", o sistema vai
+  reinstalar tudo corretamente, incluindo o Chromium próprio do
+  puppeteer (download de ~200MB, pode levar alguns minutos).
+  Isso só acontece UMA VEZ.
+
+────────────────────────────────────────────────────────────
+ATUALIZAÇÃO — 2 CORREÇÕES IMPORTANTES
+────────────────────────────────────────────────────────────
+
+1) BUG CRÍTICO CORRIGIDO: mensagens para contatos com acento
+   (ex: "mãe", "José") ou nomes com emoji travavam a thread inteira
+   de comunicação com o WhatsApp (erro "UnicodeDecodeError: charmap
+   codec"), e depois disso NADA mais funcionava — nem enviar
+   mensagem, nem ler, nem status. Era a codificação de caracteres do
+   Windows (cp1252) tentando ler texto UTF-8 vindo do Node.js. Agora
+   a leitura é forçada em UTF-8, então nomes com acento, emoji e
+   caracteres especiais funcionam normalmente.
+
+2) NOVO: INTERRUPÇÃO DE FALA (barge-in)
+   Agora, enquanto a NOX está falando, se você começar a falar por
+   cima dela, ela PARA imediatamente e passa a ouvir você — sem
+   precisar esperar ela terminar a frase. Funciona automaticamente
+   no modo /conversa, sem nenhum comando especial.

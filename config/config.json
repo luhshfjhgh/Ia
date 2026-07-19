@@ -1,0 +1,15 @@
+{
+  "ollama_model": "gemma2:2b",
+  "model": "openai/gpt-oss-120b",
+  "max_tokens": 1024,
+  "temperature": 0.85,
+  "voice_enabled": false,
+  "tts_voice": "pt-BR-FranciscaNeural",
+  "max_history_context": 20,
+  "typing_delay": 0.018,
+  "language": "pt-BR",
+  "show_timestamps": false,
+  "auto_save_interval": 10,
+  "tts_speed": "normal",
+  "personality": "sarcastica"
+}

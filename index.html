@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NOX AI — System Interface</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #FFD27A;
+    --gold-hot: #FFE9A8;
+    --amber: #FF9A2E;
+    --ember: #FF5A1F;
+    --bg: #05060A;
+    --dim: rgba(255,255,255,0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg);
+    color: #fff;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden;
+    user-select: none;
+  }
+  #app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+  canvas#bg { position: absolute; inset: 0; display: block; }
+
+  .vignette {
+    pointer-events: none; position: absolute; inset: 0; z-index: 1;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 85%, rgba(0,0,0,0.9) 100%);
+  }
+
+  /* corner brackets (full screen) */
+  .bracket { position: absolute; width: 28px; height: 28px; z-index: 10; }
+  .bracket span { position: absolute; background: rgba(255,210,122,0.5); }
+  .bracket .h { width: 28px; height: 1px; }
+  .bracket .v { width: 1px; height: 28px; }
+  .bracket.tl { top: 16px; left: 16px; } .bracket.tl .h{top:0;left:0;} .bracket.tl .v{top:0;left:0;}
+  .bracket.tr { top: 16px; right: 16px; } .bracket.tr .h{top:0;right:0;} .bracket.tr .v{top:0;right:0;}
+  .bracket.bl { bottom: 16px; left: 16px; } .bracket.bl .h{bottom:0;left:0;} .bracket.bl .v{bottom:0;left:0;}
+  .bracket.br { bottom: 16px; right: 16px; } .bracket.br .h{bottom:0;right:0;} .bracket.br .v{bottom:0;right:0;}
+
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 24px 32px 0;
+  }
+  .live-dot-wrap { position: relative; display: inline-flex; width: 10px; height: 10px; }
+  .live-ping {
+    position: absolute; inset: 0; border-radius: 50%; background: #ef4444; opacity: 0.7;
+    animation: ping 1.6s cubic-bezier(0,0,0.2,1) infinite;
+  }
+  .live-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: #ef4444; }
+  @keyframes ping { 75%,100% { transform: scale(2.2); opacity: 0; } }
+
+  .top-left { display:flex; align-items:center; gap:12px; }
+  .top-left .live-label { font-size: 11px; font-weight:700; letter-spacing: 0.3em; }
+  .top-left .ch { margin-left: 16px; font-size: 11px; letter-spacing: 0.25em; color: var(--dim); }
+
+  .top-center {
+    font-size: 11px; letter-spacing: 0.3em; color: var(--gold);
+    text-shadow: 0 0 12px rgba(255,154,46,0.4);
+  }
+
+  .top-right { text-align: right; font-size: 11px; letter-spacing: 0.25em; color: var(--dim); }
+  .top-right .clock { color: var(--gold-hot); }
+  .top-right div { margin-top: 4px; }
+
+  aside { position: absolute; top: 112px; z-index: 10; width: 288px; }
+  aside.left { left: 32px; }
+  aside.right { right: 32px; }
+
+  .panel {
+    position: relative; overflow: hidden; border-radius: 6px; border: 1px solid rgba(255,210,122,0.18);
+    background: linear-gradient(180deg, rgba(20,16,10,0.55), rgba(8,6,4,0.55));
+    backdrop-filter: blur(10px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .panel + .panel { margin-top: 16px; }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(255,210,122,0.14);
+    padding: 8px 16px; font-size: 10px; letter-spacing: 0.3em; color: var(--gold);
+    background: linear-gradient(90deg, rgba(255,154,46,0.10), transparent);
+  }
+  .panel-head .sub { color: rgba(255,255,255,0.35); }
+  .panel-corner { position: absolute; width: 8px; height: 8px; border-color: var(--gold); }
+  .panel-corner.tl { top:0; left:0; border-left:1px solid; border-top:1px solid; }
+  .panel-corner.tr { top:0; right:0; border-right:1px solid; border-top:1px solid; }
+  .panel-corner.bl { bottom:0; left:0; border-left:1px solid; border-bottom:1px solid; }
+  .panel-corner.br { bottom:0; right:0; border-right:1px solid; border-bottom:1px solid; }
+
+  .telemetry-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .telemetry-row { display:flex; align-items:center; gap: 12px; font-size: 10.5px; }
+  .telemetry-row .label { width: 36px; letter-spacing: 0.2em; color: var(--gold); }
+  .bar-track { position: relative; height: 5px; flex: 1; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,0.06); }
+  .bar-fill { height: 100%; border-radius: 999px; transition: width .7s ease; background: linear-gradient(90deg, var(--ember), var(--gold), var(--gold-hot)); box-shadow: 0 0 10px var(--amber); }
+  .bar-shine { position:absolute; top:0; height:100%; width:32px; opacity:.6; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent); }
+  .telemetry-row .val { width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .diag-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px; font-size: 10.5px; }
+  .stat { border-radius: 4px; border: 1px solid rgba(255,210,122,0.12); background: rgba(255,255,255,0.02); padding: 8px 12px; }
+  .stat .lbl { font-size: 9px; letter-spacing: 0.3em; color: var(--gold); }
+  .stat .v { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .log-body { padding: 16px; display:flex; flex-direction: column; gap: 6px; font-size: 10.5px; line-height: 1.6; color: rgba(255,235,200,0.75); }
+  .log-body div { font-family: 'JetBrains Mono', monospace; }
+
+  .mem-body { padding: 16px; font-size: 10.5px; color: rgba(255,235,200,0.7); }
+  .mem-row { display:flex; align-items:center; justify-content: space-between; margin-top: 8px; }
+  .mem-row:first-child { margin-top: 0; }
+  .mem-row .k { color: var(--gold); }
+  .mem-row .v { font-variant-numeric: tabular-nums; }
+
+  .branding {
+    pointer-events: none; position: absolute; left: 0; right: 0; z-index: 10;
+    top: calc(46% + 230px);
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .branding .line { margin-bottom: 12px; height: 1px; width: 160px; background: linear-gradient(90deg, transparent, var(--gold), transparent); }
+  .branding h1 {
+    margin: 0; user-select: none;
+    font-family: 'Montserrat', sans-serif; font-weight: 800;
+    font-size: clamp(2.5rem, 5.5vw, 4.75rem);
+    letter-spacing: 0.55em; padding-left: 0.55em;
+    background: linear-gradient(180deg, #FFFFFF 0%, var(--gold-hot) 60%, var(--gold) 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 40px rgba(255,154,46,0.33);
+    filter: drop-shadow(0 0 18px rgba(255,154,46,0.33));
+  }
+  .branding .status-line { margin-top: 12px; display:flex; align-items:center; gap:12px; font-size: 11px; letter-spacing: 0.5em; color: var(--dim); }
+  .branding .status-line .tick { display:inline-block; height:1px; width:32px; background: rgba(255,255,255,0.2); }
+  .branding .status-line .dot { display:inline-block; height:8px; width:8px; border-radius:50%; }
+
+  .toolbar-wrap { position: absolute; bottom: 48px; left: 0; right: 0; z-index: 10; display:flex; justify-content:center; }
+  .toolbar {
+    display:flex; align-items:center; gap: 8px; border-radius: 999px;
+    border: 1px solid rgba(255,210,122,0.18);
+    background: rgba(15,12,8,0.55);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 30px 80px -20px rgba(255,154,46,0.2), inset 0 1px 0 rgba(255,255,255,0.05);
+    padding: 12px 16px;
+  }
+  .tbtn {
+    position: relative; display:flex; flex-direction: column; align-items:center; justify-content:center;
+    width: 56px; height: 56px; border-radius: 50%; cursor: pointer;
+    border: 1px solid rgba(255,210,122,0.18);
+    background: rgba(255,255,255,0.03);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: all .3s ease;
+  }
+  .tbtn svg { pointer-events: none; }
+  .tbtn .tag {
+    pointer-events:none; position:absolute; bottom:-24px; white-space:nowrap;
+    font-size: 9px; letter-spacing: 0.3em; color: var(--gold);
+    opacity: 0; transition: opacity .2s ease;
+  }
+  .tbtn:hover .tag { opacity: 1; }
+  .tbtn.active {
+    border-color: var(--gold);
+    background: radial-gradient(circle at 30% 30%, var(--gold-hot), var(--amber));
+    box-shadow: 0 0 0 4px rgba(255,154,46,0.2), 0 0 30px rgba(255,210,122,0.67);
+  }
+  .tbtn.active .ripple {
+    position:absolute; inset:0; border-radius:50%; border: 1px solid var(--gold);
+    animation: ripple 1.4s ease-out infinite;
+  }
+  @keyframes ripple { 0% { transform: scale(1); opacity:.9; } 100% { transform: scale(1.9); opacity:0; } }
+
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0; z-index: 10;
+    display:flex; justify-content: space-between; padding: 0 32px;
+    font-size: 10px; letter-spacing: 0.35em; color: rgba(255,255,255,0.35);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="bg"></canvas>
+  <div class="vignette"></div>
+
+  <div class="bracket tl"><span class="h"></span><span class="v"></span></div>
+  <div class="bracket tr"><span class="h"></span><span class="v"></span></div>
+  <div class="bracket bl"><span class="h"></span><span class="v"></span></div>
+  <div class="bracket br"><span class="h"></span><span class="v"></span></div>
+
+  <header>
+    <div class="top-left">
+      <span class="live-dot-wrap"><span class="live-ping"></span><span class="live-dot"></span></span>
+      <span class="live-label">LIVE</span>
+      <span class="ch">CH·07 / SECURE</span>
+    </div>
+    <div class="top-center">NOX // NEURAL OPERATIONS &amp; XENOSYNTHESIS</div>
+    <div class="top-right">
+      <div class="clock" id="clock">00:00:00 UTC</div>
+      <div id="dateStr">—</div>
+      <div>NODE-07 / EU-WEST</div>
+    </div>
+  </header>
+
+  <aside class="left">
+    <div class="panel">
+      <div class="panel-head"><span>SYSTEM TELEMETRY</span><span class="sub">real-time</span></div>
+      <div class="telemetry-body" id="telemetryBody"></div>
+      <span class="panel-corner tl"></span><span class="panel-corner tr"></span>
+      <span class="panel-corner bl"></span><span class="panel-corner br"></span>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span>DIAGNOSTICS</span></div>
+      <div class="diag-grid">
+        <div class="stat"><div class="lbl">LATENCY</div><div class="v">12 ms</div></div>
+        <div class="stat"><div class="lbl">THROUGHPUT</div><div class="v">1.4 GB/s</div></div>
+        <div class="stat"><div class="lbl">UPTIME</div><div class="v" id="uptime">412:08</div></div>
+        <div class="stat"><div class="lbl">TASKS</div><div class="v">08 / 32</div></div>
+      </div>
+      <span class="panel-corner tl"></span><span class="panel-corner tr"></span>
+      <span class="panel-corner bl"></span><span class="panel-corner br"></span>
+    </div>
+  </aside>
+
+  <aside class="right">
+    <div class="panel">
+      <div class="panel-head"><span>ACTIVITY STREAM</span><span class="sub">live feed</span></div>
+      <div class="log-body" id="logBody"></div>
+      <span class="panel-corner tl"></span><span class="panel-corner tr"></span>
+      <span class="panel-corner bl"></span><span class="panel-corner br"></span>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span>MEMORY CORE</span></div>
+      <div class="mem-body">
+        <div class="mem-row"><span class="k">VECTORS</span><span class="v">2,481,902</span></div>
+        <div class="mem-row"><span class="k">CONTEXT</span><span class="v">128,000 tok</span></div>
+        <div class="mem-row"><span class="k">MODEL</span><span>nox-core/4.1·turbo</span></div>
+      </div>
+      <span class="panel-corner tl"></span><span class="panel-corner tr"></span>
+      <span class="panel-corner bl"></span><span class="panel-corner br"></span>
+    </div>
+  </aside>
+
+  <div class="branding">
+    <div class="line"></div>
+    <h1>NOX&nbsp;&nbsp;AI</h1>
+    <div class="status-line" id="statusLine">
+      <span class="tick"></span>
+      <span id="statusText">SYSTEM STANDBY</span>
+      <span class="tick"></span>
+    </div>
+  </div>
+
+  <div class="toolbar-wrap">
+    <div class="toolbar" id="toolbar"></div>
+  </div>
+
+  <footer>
+    <span>© NOX SYSTEMS / EST. 2026</span>
+    <span>v 4.1 · BUILD 28A</span>
+    <span>TLS 1.3 · END-TO-END</span>
+  </footer>
+</div>
+
+<script>
+/* ───────────────────────── ICONS ───────────────────────── */
+const ICONS = {
+  mic: c => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="2.5" width="6" height="11.5" rx="3" />
+    <path d="M5.5 11v1.5a6.5 6.5 0 0 0 13 0V11" />
+    <line x1="12" y1="20" x2="12" y2="22.5" /></svg>`,
+  cam: c => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 18.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h3.5l1.8-2.5h5.4l1.8 2.5H20a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="3.6" /></svg>`,
+  chat: c => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 14.5a2 2 0 0 1-2 2H8l-4 4V5.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" />
+    <line x1="8" y1="9.5" x2="16" y2="9.5" /><line x1="8" y1="12.5" x2="13" y2="12.5" /></svg>`,
+  key: c => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7.5 14h9" /></svg>`,
+  grid: c => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" /><rect x="14" y="3.5" width="6.5" height="6.5" rx="1" />
+    <rect x="3.5" y="14" width="6.5" height="6.5" rx="1" /><rect x="14" y="14" width="6.5" height="6.5" rx="1" /></svg>`,
+};
+
+const GOLD = "#FFD27A", GOLD_HOT = "#FFE9A8", AMBER = "#FF9A2E", EMBER = "#FF5A1F";
+
+/* ───────────────────────── STATE ───────────────────────── */
+let active = false;
+let telemetry = { CPU: 12, GPU: 38, RAM: 45, NET: 67, PWR: 98 };
+let logLines = ["› boot sequence complete", "› neural core synchronized", "› awaiting directive"];
+
+function setStatus(text, isActive) {
+  document.getElementById("statusText").textContent = text;
+  const st = document.getElementById("statusLine");
+  st.style.color = isActive ? GOLD_HOT : "rgba(255,255,255,0.45)";
+  const ticks = st.querySelectorAll(".tick");
+  ticks.forEach(t => t.style.background = isActive ? GOLD : "rgba(255,255,255,0.2)");
+  let dot = st.querySelector(".dot");
+  if (isActive && !dot) {
+    dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = GOLD_HOT;
+    dot.style.boxShadow = `0 0 10px ${GOLD}`;
+    dot.style.animation = "ping 1.4s ease-in-out infinite";
+    st.insertBefore(dot, st.children[2]);
+  } else if (!isActive && dot) {
+    dot.remove();
+  }
+}
+
+function renderTelemetry() {
+  const body = document.getElementById("telemetryBody");
+  body.innerHTML = "";
+  for (const [k, v] of Object.entries(telemetry)) {
+    const row = document.createElement("div");
+    row.className = "telemetry-row";
+    row.innerHTML = `
+      <span class="label">${k}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${v}%"></div>
+        <div class="bar-shine" style="left:${Math.max(0, v - 8)}%"></div>
+      </div>
+      <span class="val">${v}%</span>`;
+    body.appendChild(row);
+  }
+}
+
+function renderLog() {
+  const body = document.getElementById("logBody");
+  body.innerHTML = "";
+  const last = logLines.slice(-6);
+  last.forEach((line, i) => {
+    const div = document.createElement("div");
+    div.textContent = line;
+    div.style.opacity = 0.4 + (i / last.length) * 0.6;
+    body.appendChild(div);
+  });
+}
+
+function buildToolbar() {
+  const toolbar = document.getElementById("toolbar");
+  const buttons = [
+    { key: "mic", label: "VOICE", onClick: toggleMic },
+    { key: "cam", label: "VISION" },
+    { key: "chat", label: "CHAT" },
+    { key: "key", label: "INPUT" },
+    { key: "grid", label: "MODULES" },
+  ];
+  toolbar.innerHTML = "";
+  buttons.forEach(b => {
+    const btn = document.createElement("div");
+    btn.className = "tbtn";
+    btn.dataset.key = b.key;
+    btn.innerHTML = ICONS[b.key](GOLD) + `<span class="tag">${b.label}</span>`;
+    if (b.onClick) btn.addEventListener("click", b.onClick);
+    toolbar.appendChild(btn);
+  });
+}
+
+function refreshMicButton() {
+  const btn = document.querySelector('.tbtn[data-key="mic"]');
+  if (!btn) return;
+  btn.classList.toggle("active", active);
+  btn.innerHTML = ICONS.mic(active ? "#1a0f00" : GOLD) + `<span class="tag">VOICE</span>` + (active ? `<span class="ripple"></span>` : "");
+}
+
+function toggleMic() {
+  active = !active;
+  setStatus(active ? "LISTENING" : "SYSTEM STANDBY", active);
+  logLines = [...logLines.slice(-6), active ? "› microphone armed" : "› microphone disarmed"];
+  renderLog();
+  refreshMicButton();
+
+  // Ponte com o backend Python (sua IA). Veja app.py -> class Api.
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.toggle_mic) {
+    window.pywebview.api.toggle_mic(active);
+  }
+}
+
+/* ───────────────────────── CLOCK ───────────────────────── */
+function pad(n) { return n.toString().padStart(2, "0"); }
+function updateClock() {
+  const t = new Date();
+  document.getElementById("clock").textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())} UTC`;
+  document.getElementById("dateStr").textContent = t.toUTCString().split(" ").slice(0, 4).join(" ");
+}
+
+/* ───────────────────────── TELEMETRY JITTER ───────────────────────── */
+function jitterTelemetry() {
+  for (const k of Object.keys(telemetry)) {
+    telemetry[k] = Math.max(8, Math.min(99, telemetry[k] + Math.round((Math.random() - 0.5) * 8)));
+  }
+  renderTelemetry();
+}
+
+/* ───────────────────────── LOG FEED ───────────────────────── */
+const LOG_SAMPLES = [
+  "› scanning ambient frequencies",
+  "› vector cache refreshed",
+  "› context window: 128k tokens",
+  "› telemetry stream nominal",
+  "› orbital sync ±0.003ms",
+  "› integrity check passed",
+  "› channel encryption: AES-256-GCM",
+  "› cognitive load: 0.41",
+];
+function pushLogSample() {
+  const sample = LOG_SAMPLES[Math.floor(Math.random() * LOG_SAMPLES.length)];
+  logLines = [...logLines.slice(-6), sample];
+  renderLog();
+}
+
+/* ───────────────────────── CANVAS ANIMATION ───────────────────────── */
+(function () {
+  const canvas = document.getElementById("bg");
+  const ctx = canvas.getContext("2d");
+  let raf = 0, t = 0;
+
+  const stars = Array.from({ length: 220 }, () => ({
+    x: Math.random(), y: Math.random(), z: Math.random(),
+    s: 0.3 + Math.random() * 1.4, v: 0.0001 + Math.random() * 0.0006, tw: Math.random() * Math.PI * 2,
+  }));
+
+  const orbits = [
+    { rx: 170, ry: 90, v: 0.018, dir: 1, rot: 28, thickness: 1 },
+    { rx: 215, ry: 115, v: 0.013, dir: -1, rot: -18, thickness: 1 },
+    { rx: 265, ry: 145, v: 0.009, dir: 1, rot: 62, thickness: 0.8 },
+    { rx: 145, ry: 145, v: 0.022, dir: -1, rot: 0, thickness: 0.8 },
+  ];
+
+  const comets = [
+    { orbit: 0, phase: 0, speed: 1.0, len: 60 },
+    { orbit: 0, phase: Math.PI, speed: 1.0, len: 40 },
+    { orbit: 1, phase: 1.2, speed: 0.9, len: 70 },
+    { orbit: 2, phase: 2.4, speed: 0.7, len: 90 },
+    { orbit: 3, phase: 0.5, speed: 1.3, len: 50 },
+  ];
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  function drawBackdrop(w, h) {
+    const bg = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.7);
+    bg.addColorStop(0, "#0c0a14"); bg.addColorStop(0.4, "#06060c"); bg.addColorStop(1, "#020205");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = "rgba(255,210,122,0.05)";
+    const step = 38;
+    for (let y = 0; y < h; y += step) {
+      for (let x = ((y / step) % 2) * (step / 2); x < w; x += step) {
+        ctx.beginPath(); ctx.arc(x, y, 0.7, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  function drawStars(w, h) {
+    for (const p of stars) {
+      p.tw += 0.02; p.y -= p.v * (0.4 + p.z);
+      if (p.y < 0) p.y = 1;
+      const x = p.x * w, y = p.y * h;
+      const a = (0.2 + 0.8 * p.z) * (0.6 + 0.4 * Math.sin(p.tw));
+      ctx.fillStyle = `rgba(255,235,200,${a})`;
+      ctx.beginPath(); ctx.arc(x, y, p.s * (0.6 + p.z * 0.8), 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawCore(cx, cy, radius) {
+    const outer = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 5);
+    outer.addColorStop(0, "rgba(255,180,90,0.35)"); outer.addColorStop(0.3, "rgba(255,120,40,0.15)"); outer.addColorStop(1, "rgba(255,80,20,0)");
+    ctx.fillStyle = outer; ctx.beginPath(); ctx.arc(cx, cy, radius * 5, 0, Math.PI * 2); ctx.fill();
+
+    const mid = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 2.4);
+    mid.addColorStop(0, "rgba(255,255,255,1)"); mid.addColorStop(0.12, GOLD_HOT); mid.addColorStop(0.35, GOLD);
+    mid.addColorStop(0.7, "rgba(255,120,40,0.45)"); mid.addColorStop(1, "rgba(255,60,10,0)");
+    ctx.fillStyle = mid; ctx.beginPath(); ctx.arc(cx, cy, radius * 2.4, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = "#FFFFFF"; ctx.shadowColor = GOLD_HOT; ctx.shadowBlur = 30;
+    ctx.beginPath(); ctx.arc(cx, cy, radius * 0.22, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+
+    const ringR = radius * 1.05;
+    ctx.strokeStyle = `rgba(255,220,150,${0.5 + 0.4 * Math.sin(t * 3)})`; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,210,122,0.5)"; ctx.lineWidth = 1;
+    for (let i = 0; i < 60; i++) {
+      const a = (i / 60) * Math.PI * 2 + t * 0.3;
+      const r1 = radius * 1.55, r2 = radius * (1.6 + (i % 5 === 0 ? 0.12 : 0.05));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+      ctx.stroke();
+    }
+  }
+
+  function orbitPoint(o, rad) {
+    const rot = (o.rot * Math.PI) / 180;
+    const tx = o.rx * Math.cos(rad), ty = o.ry * Math.sin(rad);
+    return { x: tx * Math.cos(rot) - ty * Math.sin(rot), y: tx * Math.sin(rot) + ty * Math.cos(rot) };
+  }
+
+  function drawOrbit(cx, cy, o) {
+    ctx.strokeStyle = "rgba(255,210,122,0.10)"; ctx.lineWidth = o.thickness;
+    ctx.beginPath();
+    for (let i = 0; i <= 360; i += 2) {
+      const p = orbitPoint(o, (i * Math.PI) / 180);
+      if (i === 0) ctx.moveTo(cx + p.x, cy + p.y); else ctx.lineTo(cx + p.x, cy + p.y);
+    }
+    ctx.closePath(); ctx.stroke();
+
+    ctx.setLineDash([2, 8]); ctx.strokeStyle = "rgba(255,235,170,0.18)"; ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  function drawComet(cx, cy, c) {
+    const o = orbits[c.orbit];
+    const head = t * o.v * o.dir * 10 * c.speed + c.phase;
+    ctx.shadowColor = GOLD_HOT; ctx.shadowBlur = 14;
+    for (let i = 0; i < c.len; i++) {
+      const rad = head - (i / c.len) * 0.9 * o.dir;
+      const p = orbitPoint(o, rad);
+      const a = Math.pow(1 - i / c.len, 2);
+      ctx.fillStyle = `rgba(255,${220 - i * 2},${150 - i * 3},${a})`;
+      const r = 1.6 * (1 - i / c.len) + 0.5;
+      ctx.beginPath(); ctx.arc(cx + p.x, cy + p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    const head_p = orbitPoint(o, head);
+    const grad = ctx.createRadialGradient(cx + head_p.x, cy + head_p.y, 0, cx + head_p.x, cy + head_p.y, 12);
+    grad.addColorStop(0, "rgba(255,255,255,1)"); grad.addColorStop(0.4, GOLD_HOT); grad.addColorStop(1, "rgba(255,140,40,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx + head_p.x, cy + head_p.y, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawScanline(cx, cy, R) {
+    const a = t * 0.4;
+    const grad = ctx.createConicGradient(a, cx, cy);
+    grad.addColorStop(0, "rgba(255,210,122,0.18)");
+    grad.addColorStop(0.05, "rgba(255,210,122,0)");
+    grad.addColorStop(1, "rgba(255,210,122,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function loop() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const cx = w / 2, cy = h * 0.46;
+
+    drawBackdrop(w, h);
+    drawStars(w, h);
+    drawScanline(cx, cy, 320);
+
+    for (const o of orbits) drawOrbit(cx, cy, o);
+    for (const c of comets) drawComet(cx, cy, c);
+
+    if (active) {
+      ctx.strokeStyle = GOLD_HOT; ctx.lineWidth = 1.5; ctx.shadowColor = GOLD; ctx.shadowBlur = 10;
+      ctx.beginPath();
+      const baseY = cy + 320;
+      for (let x = cx - 240; x <= cx + 240; x += 3) {
+        const k = (x - cx) / 240;
+        const env = Math.exp(-k * k * 2);
+        const y = baseY + Math.sin(x * 0.08 + t * 6) * 14 * env + Math.sin(x * 0.3 + t * 9) * 6 * env;
+        if (x === cx - 240) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke(); ctx.shadowBlur = 0;
+    }
+
+    const pulse = 1 + 0.06 * Math.sin(t * 3.5);
+    drawCore(cx, cy, 56 * pulse);
+
+    ctx.fillStyle = "rgba(255,255,255,0.02)";
+    for (let i = 0; i < 80; i++) ctx.fillRect(Math.random() * w, Math.random() * h, 1, 1);
+
+    t += 0.04;
+    raf = requestAnimationFrame(loop);
+  }
+  loop();
+})();
+
+/* ───────────────────────── BOOT ───────────────────────── */
+renderTelemetry();
+renderLog();
+buildToolbar();
+setStatus("SYSTEM STANDBY", false);
+updateClock();
+setInterval(updateClock, 1000);
+setInterval(jitterTelemetry, 800);
+setInterval(pushLogSample, 1800);
+</script>
+</body>
+</html>
