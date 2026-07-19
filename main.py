@@ -195,17 +195,20 @@ def _auth_flow():
     """
     session = nox_auth.load_session()
     if session:
-        return session["user_id"], session["username"]
+        return session["user_id"], session["username"], session.get("role", "user")
 
     os.system("cls" if os.name == "nt" else "clear")
     print(BANNER)
     print(f"\n  {C.BOLD}{C.WHITE}Bem-vindo à NOX AI!{C.RESET}")
     print(f"  {C.GRAY}Você precisa de uma conta para usar a Nox.{C.RESET}\n")
+    if nox_auth.sb.is_configured():
+        print(f"  {C.GREEN}☁  Contas sincronizadas na nuvem (Supabase) — use em qualquer PC.{C.RESET}\n")
 
     while True:
         print(f"  {C.CYAN}1.{C.RESET} Entrar")
         print(f"  {C.CYAN}2.{C.RESET} Criar conta")
-        print(f"  {C.CYAN}3.{C.RESET} Sair")
+        print(f"  {C.CYAN}3.{C.RESET} Esqueci minha senha")
+        print(f"  {C.CYAN}4.{C.RESET} Sair")
         try:
             op = input(f"\n  {C.BOLD}Opção: {C.RESET}").strip()
         except (KeyboardInterrupt, EOFError):
@@ -217,26 +220,45 @@ def _auth_flow():
                 password = input("  Senha: ").strip()
             except (KeyboardInterrupt, EOFError):
                 continue
-            ok, user_id, msg = nox_auth.login(username, password)
+            ok, info, msg = nox_auth.login(username, password)
             print(f"  {C.GREEN if ok else C.RED}{msg}{C.RESET}\n")
             if ok:
-                nox_auth.save_session(user_id, username)
-                return user_id, username
+                nox_auth.save_session(info["user_id"], info["username"], info.get("role", "user"))
+                return info["user_id"], info["username"], info.get("role", "user")
 
         elif op == "2":
             try:
                 username = input("  Escolha um usuário: ").strip()
+                email    = input("  E-mail (usado para recuperar senha): ").strip()
                 password = input("  Escolha uma senha: ").strip()
             except (KeyboardInterrupt, EOFError):
                 continue
-            ok, msg = nox_auth.register(username, password)
+            ok, msg = nox_auth.register(username, password, email=email or None)
             print(f"  {C.GREEN if ok else C.RED}{msg}{C.RESET}\n")
             if ok:
-                _, user_id, _ = nox_auth.login(username, password)
-                nox_auth.save_session(user_id, username)
-                return user_id, username
+                _, info, _ = nox_auth.login(username, password)
+                if info:
+                    nox_auth.save_session(info["user_id"], info["username"], info.get("role", "user"))
+                    return info["user_id"], info["username"], info.get("role", "user")
 
         elif op == "3":
+            try:
+                username = input("  Usuário: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                continue
+            ok, msg, code = nox_auth.request_password_reset(username)
+            print(f"  {C.GREEN if ok else C.RED}{msg}{C.RESET}")
+            if code:
+                print(f"  {C.YELLOW}{C.BOLD}Código: {code}{C.RESET}\n")
+                try:
+                    entered = input("  Digite o código recebido: ").strip()
+                    new_pw  = input("  Nova senha: ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    continue
+                ok2, msg2 = nox_auth.reset_password(username, entered, new_pw)
+                print(f"  {C.GREEN if ok2 else C.RED}{msg2}{C.RESET}\n")
+
+        elif op == "4":
             sys.exit(0)
         else:
             print(f"  {C.YELLOW}Opção inválida.{C.RESET}\n")
@@ -419,9 +441,10 @@ class NoxAI:
 
     TTS_SPEEDS = {"lenta": "-20%", "normal": "+0%", "rapida": "+25%", "turbina": "+50%"}
 
-    def __init__(self, account_user_id=None, account_username=None):
+    def __init__(self, account_user_id=None, account_username=None, account_role="user"):
         self.account_user_id  = account_user_id
         self.account_username = account_username
+        self.account_role     = account_role or "user"
         self.config      = ConfigManager()
         self.memory      = MemoryManager(account_username)
         self.history     = []
@@ -2073,6 +2096,7 @@ class NoxAI:
             "/historico_conta":self._cmd_historico_conta,
             "/manutencao":     self._cmd_manutencao,
             "/teste_atualizacao": self._cmd_teste_atualizacao,
+            "/admin_usuarios": self._cmd_admin_usuarios,
         }
         dispatch.get(cmd_lower, lambda: self.print_nox("Comando desconhecido. Digite /ajuda."))()
 
@@ -2389,6 +2413,8 @@ class NoxAI:
 {C.WHITE}  /historico_conta {C.GRAY}— Histórico de mensagens salvas nesta conta
 {C.WHITE}  /logout          {C.GRAY}— Sai da conta atual e volta à tela de login
 {C.WHITE}  /manutencao      {C.GRAY}— Verifica e instala atualizações da NOX (GitHub)
+{C.WHITE}  /admin_usuarios  {C.GRAY}— Lista contas cadastradas (apenas admin)
+{C.GRAY}  Esqueceu a senha? Escolha a opção 3 na tela de login.{C.RESET}
 
 {C.CYAN}{C.BOLD}  ── 🤖 Sistema Multiagente (v4.0) ────────────────────────────{C.RESET}
 {C.WHITE}  /agente          {C.GRAY}— Envia tarefa para +60 agentes especializados
@@ -2574,8 +2600,10 @@ class NoxAI:
         self.running = False
 
     def _cmd_conta(self):
+        role_tag = f"{C.YELLOW}👑 admin{C.RESET}" if self._is_admin() else f"{C.GRAY}usuário{C.RESET}"
         print(f"\n{C.PURPLE}{C.BOLD}  ╔══ MINHA CONTA ═════════════════════════════╗{C.RESET}")
-        print(f"  Usuário : {C.CYAN}{self.account_username or '?'}{C.RESET}")
+        print(f"  Usuário : {C.CYAN}{self.account_username or '?'}{C.RESET}  {role_tag}")
+        print(f"  Nuvem   : {C.GREEN + '☁ sincronizado' if nox_auth.sb.is_configured() else C.GRAY + 'offline (local)'}{C.RESET}")
         print(f"  Memória : {C.GRAY}{self.memory.memory_file}{C.RESET}")
         print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
         print(f"  {C.GRAY}Use /logout para sair da conta.{C.RESET}\n")
@@ -2617,6 +2645,20 @@ class NoxAI:
             print(f"  {tag}: {texto}")
         print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
 
+    def _is_admin(self) -> bool:
+        return self.account_role == "admin"
+
+    def _cmd_admin_usuarios(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        users = nox_auth.list_all_users()
+        print(f"\n{C.PURPLE}{C.BOLD}  ╔══ USUÁRIOS CADASTRADOS ══════════════════════╗{C.RESET}")
+        for u in users:
+            role_tag = f"{C.YELLOW}👑 admin{C.RESET}" if u.get("role") == "admin" else f"{C.GRAY}usuário{C.RESET}"
+            print(f"  {C.CYAN}{u.get('username','?'):<20}{C.RESET} {role_tag}")
+        print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
+
     def _cmd_teste_atualizacao(self):
         """Comando de teste — só existe pra provar que o /manutencao funcionou."""
         v = nox_updater.get_local_version()
@@ -2630,7 +2672,12 @@ class NoxAI:
         Modo de manutenção: verifica se há uma nova versão da NOX no
         GitHub e, se houver, baixa e substitui os próprios arquivos —
         sem apagar memória, contas, .env ou configurações pessoais.
+        Apenas administradores podem rodar esse comando.
         """
+        if not self._is_admin():
+            self.print_nox("🔒 Apenas administradores podem rodar a manutenção do sistema.")
+            return
+
         print(f"\n{C.YELLOW}{C.BOLD}  ╔══ MODO DE MANUTENÇÃO ══════════════════════╗{C.RESET}")
         print(f"  {C.GRAY}Repositório: github.com/{nox_updater.REPO_OWNER}/{nox_updater.REPO_NAME}{C.RESET}")
         print(f"{C.YELLOW}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
@@ -4021,7 +4068,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Erro ao iniciar splash screen: {e}")
 
-    _user_id, _username = _auth_flow()
+    _user_id, _username, _role = _auth_flow()
 
-    nox = NoxAI(account_user_id=_user_id, account_username=_username)
+    nox = NoxAI(account_user_id=_user_id, account_username=_username, account_role=_role)
     nox.run()
