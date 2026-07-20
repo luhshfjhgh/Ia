@@ -62,6 +62,57 @@ def _connect() -> sqlite3.Connection:
         )
     """)
     conn.commit()
+
+    # ── Migração automática (parte 1): bancos criados por uma versão
+    # ainda mais antiga tinham "id" como INTEGER (chave numérica). O
+    # código atual usa "id" como TEXT (pra aceitar UUIDs do Supabase).
+    # SQLite não deixa alterar o tipo de uma coluna existente, então
+    # reconstruímos a tabela do zero preservando todos os dados.
+    id_col = next((c for c in conn.execute("PRAGMA table_info(users)").fetchall() if c[1] == "id"), None)
+    if id_col and id_col[2].upper() != "TEXT":
+        old_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        conn.execute("ALTER TABLE users RENAME TO users_old_migrando")
+        conn.execute("""
+            CREATE TABLE users (
+                id            TEXT PRIMARY KEY,
+                username      TEXT UNIQUE NOT NULL,
+                name          TEXT,
+                email         TEXT,
+                password_hash TEXT NOT NULL,
+                salt          TEXT,
+                role          TEXT NOT NULL DEFAULT 'user',
+                created_at    TEXT NOT NULL
+            )
+        """)
+        name_sel = "name" if "name" in old_cols else "username"
+        email_sel = "email" if "email" in old_cols else "NULL"
+        salt_sel = "salt" if "salt" in old_cols else "NULL"
+        role_sel = "role" if "role" in old_cols else "'user'"
+        conn.execute(f"""
+            INSERT INTO users (id, username, name, email, password_hash, salt, role, created_at)
+            SELECT CAST(id AS TEXT), username, {name_sel}, {email_sel},
+                   password_hash, {salt_sel}, {role_sel}, created_at
+            FROM users_old_migrando
+        """)
+        conn.execute("DROP TABLE users_old_migrando")
+        conn.commit()
+
+    # ── Migração automática (parte 2): bancos criados por uma versão
+    # mais antiga da NOX podem não ter as colunas "name", "email" e
+    # "role". Adiciona o que estiver faltando, sem apagar dado nenhum.
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    for col_name, col_def in (
+        ("name", "TEXT"),
+        ("email", "TEXT"),
+        ("role", "TEXT NOT NULL DEFAULT 'user'"),
+    ):
+        if col_name not in existing_cols:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError:
+                pass  # coluna já existe (corrida entre processos) — ignora
+    conn.commit()
+
     return conn
 
 
@@ -134,6 +185,7 @@ def register(username: str, password: str, email: str | None = None, name: str |
             role = "admin" if is_first else "user"
             created = sb.create_user(name, username, email, combined_hash, role=role)
             _local_upsert_user(created["id"], username, name, email, pwd_hash, salt, role)
+            sb.log_event(created["id"], username, "account_created", f"role={role}")
             extra = " Você é o primeiro usuário — virou ADMIN. 👑" if is_first else ""
             return True, f"Conta criada com sucesso (sincronizada na nuvem)!{extra}"
         except Exception as e:
@@ -152,13 +204,38 @@ def register(username: str, password: str, email: str | None = None, name: str |
 
 
 # ── Login ─────────────────────────────────────────────────────────────
+_FAILED_LOGIN_ALERT_THRESHOLD = 5
+
+
 def login(username: str, password: str) -> tuple[bool, dict | None, str]:
     username = username.strip()
+    ip, location = (None, None)
+    try:
+        import geoip
+        ip, location = geoip.get_ip_and_location()
+    except Exception:
+        pass
 
     if sb.is_configured():
         try:
             user = sb.get_user_by_username(username)
             if user:
+                # ── Conta banida? (independe do PC — segue o usuário) ──
+                if user.get("is_banned"):
+                    until = user.get("ban_until")
+                    still_active = True
+                    if until:
+                        try:
+                            still_active = datetime.fromisoformat(until.replace("Z", "+00:00")).replace(tzinfo=None) > datetime.now()
+                        except Exception:
+                            still_active = True
+                    if still_active:
+                        sb.log_event(user["id"], username, "login_blocked_banned", user.get("ban_reason", ""), ip or "", location or "")
+                        motivo = user.get("ban_reason") or "sem motivo especificado"
+                        return False, None, f"🚫 Esta conta está banida. Motivo: {motivo}"
+                    else:
+                        sb.unban_account(user["id"])  # ban expirou, libera automaticamente
+
                 stored = user.get("password_hash", "")
                 if "$" in stored:
                     pwd_hash, salt = stored.split("$", 1)
@@ -168,10 +245,29 @@ def login(username: str, password: str) -> tuple[bool, dict | None, str]:
                         _local_upsert_user(user["id"], username, user.get("name", username),
                                             user.get("email", ""), pwd_hash, salt, role)
                         try:
-                            sb.update_user(user["id"], {"last_login": datetime.now().isoformat()})
+                            sb.update_user(user["id"], {
+                                "last_login": datetime.now().isoformat(),
+                                "last_login_ip": ip, "last_login_location": location,
+                            })
+                            sb.reset_failed_login(user["id"])
+                            sb.log_event(user["id"], username, "login_success", "", ip or "", location or "")
                         except Exception:
                             pass
                         return True, {"user_id": user["id"], "username": username, "role": role}, "Login realizado com sucesso!"
+
+                # Senha errada — conta tentativa e alerta por e-mail se passar do limite
+                try:
+                    new_count = sb.increment_failed_login(user["id"], user.get("failed_login_count", 0))
+                    sb.log_event(user["id"], username, "login_failed", f"tentativa {new_count}", ip or "", location or "")
+                    if new_count >= _FAILED_LOGIN_ALERT_THRESHOLD:
+                        loc_txt = f" (localização aproximada: {location})" if location else ""
+                        sb.send_security_alert_email(
+                            user.get("email", ""), user.get("name", username),
+                            f"{new_count} tentativas de login falharam na sua conta NOX AI{loc_txt}. "
+                            f"Se não foi você, troque sua senha.",
+                        )
+                except Exception:
+                    pass
                 return False, None, "Senha incorreta."
             # Não achou no Supabase — tenta cache local antes de desistir
         except Exception:
@@ -334,3 +430,65 @@ def list_all_users() -> list[dict]:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
+
+# ── Moderação (admin) — ban/desban por CONTA, não por PC ────────────────
+def admin_ban_account(target_username: str, reason: str, hours: int | None = None) -> tuple[bool, str]:
+    if not sb.is_configured():
+        return False, "Isso requer Supabase configurado (ban por conta precisa da nuvem)."
+    try:
+        user = sb.get_user_by_username(target_username.strip())
+        if not user:
+            return False, "Usuário não encontrado."
+        until_iso = (datetime.now() + timedelta(hours=hours)).isoformat() if hours else None
+        sb.ban_account(user["id"], reason, until_iso)
+        return True, f"Conta '{target_username}' banida" + (f" por {hours}h." if hours else " (indefinidamente).")
+    except Exception as e:
+        return False, f"Erro: {e}"
+
+
+def admin_unban_account(target_username: str) -> tuple[bool, str]:
+    if not sb.is_configured():
+        return False, "Isso requer Supabase configurado."
+    try:
+        user = sb.get_user_by_username(target_username.strip())
+        if not user:
+            return False, "Usuário não encontrado."
+        sb.unban_account(user["id"])
+        return True, f"Conta '{target_username}' desbanida."
+    except Exception as e:
+        return False, f"Erro: {e}"
+
+
+# ── Cota diária de mensagens (não se aplica a admin) ─────────────────────
+def check_and_bump_daily_limit(user_id, role: str) -> tuple[bool, int, int]:
+    """Retorna (pode_continuar, uso_atual, limite). Admin sempre passa."""
+    if role == "admin" or not sb.is_configured():
+        return True, 0, 0
+    try:
+        user = sb.get_user_by_id(user_id)
+        if not user:
+            return True, 0, 0
+        limit = user.get("daily_message_limit") or 200
+        count, limit = sb.bump_daily_message_count(user)
+        return (count <= limit), count, limit
+    except Exception:
+        return True, 0, 0  # se a checagem falhar, não trava o usuário por causa de um erro de rede
+
+
+# ── Auditoria (admin) ────────────────────────────────────────────────────
+def get_audit_log(limit: int = 30) -> list[dict]:
+    if not sb.is_configured():
+        return []
+    try:
+        return sb.get_audit_log(limit)
+    except Exception:
+        return []
+
+
+def log_event(user_id, username: str, event: str, details: str = "") -> None:
+    if sb.is_configured():
+        try:
+            sb.log_event(user_id, username, event, details)
+        except Exception:
+            pass

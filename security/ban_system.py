@@ -85,19 +85,33 @@ def _derive_key(fp: str) -> bytes:
     return base64.urlsafe_b64encode(raw)
 
 # ── Fingerprint ───────────────────────────────────────────────
+def _get_machine_guid() -> str | None:
+    """GUID único gerado na instalação do Windows — não muda entre
+    execuções (ao contrário do MAC via uuid.getnode(), que pode sortear
+    um valor aleatório novo a cada vez quando não acha um adaptador
+    de rede real, causando falso positivo de 'adulteração')."""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0,
+                              winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
+        val, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        return val
+    except Exception:
+        return None
+
+
 def _get_fingerprint() -> str:
     try:
         hostname = socket.gethostname()
-        mac      = uuid.UUID(int=uuid.getnode()).hex[-12:]
-        # Tenta pegar serial do volume no Windows
-        try:
-            import subprocess
-            out = subprocess.check_output("vol C:", shell=True, stderr=subprocess.DEVNULL).decode()
-            serial = re.search(r"[0-9A-F]{4}-[0-9A-F]{4}", out)
-            vol = serial.group(0) if serial else "NOVOL"
-        except Exception:
-            vol = "NOVOL"
-        raw = f"{hostname}:{mac}:{vol}"
+        machine_guid = _get_machine_guid()
+        if machine_guid:
+            raw = f"{hostname}:{machine_guid}"
+        else:
+            # Fallback (não-Windows ou sem acesso ao registro): usa MAC
+            # mesmo sabendo que pode ser instável em alguns ambientes.
+            mac = uuid.UUID(int=uuid.getnode()).hex[-12:]
+            raw = f"{hostname}:{mac}"
     except Exception:
         raw = socket.gethostname()
     return hashlib.sha256(raw.encode()).hexdigest()[:32]

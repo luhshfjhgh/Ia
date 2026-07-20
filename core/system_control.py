@@ -407,6 +407,31 @@ def restart(delay_min: int = 0) -> str:
         return f"❌ Erro: {e}"
 
 
+def hibernate() -> str:
+    try:
+        if IS_WIN:
+            _run("shutdown /h")
+        elif IS_MAC:
+            _run("pmset sleepnow")
+        else:
+            _run("systemctl hibernate")
+        return "💤 Hibernando o sistema..."
+    except Exception as e:
+        return f"❌ Erro: {e}"
+
+
+def cancel_shutdown() -> str:
+    """Cancela um desligamento/reinício agendado (caso o usuário confirme mas mude de ideia depois)."""
+    try:
+        if IS_WIN:
+            _run("shutdown /a")
+        elif IS_MAC or IS_LINUX:
+            _run("shutdown -c")
+        return "✅ Desligamento/reinício cancelado."
+    except Exception as e:
+        return f"❌ Erro: {e}"
+
+
 # ══════════════════════════════════════════════════════
 #  VOLUME
 # ══════════════════════════════════════════════════════
@@ -581,6 +606,103 @@ def open_spotify(query: str = "") -> str:
 
 
 # ══════════════════════════════════════════════════════
+#  CONTROLE DE MÍDIA (Spotify em segundo plano — sem abrir janela)
+# ══════════════════════════════════════════════════════
+# Usa as teclas virtuais de mídia do Windows (as mesmas do teclado
+# físico de play/pause/próxima/anterior). Funciona com o Spotify
+# aberto minimizado/na bandeja — não precisa focar nem abrir janela.
+# Não usa nenhuma biblioteca nova (só ctypes, que já vem no Python).
+
+_VK_MEDIA_PLAY_PAUSE = 0xB3
+_VK_MEDIA_NEXT_TRACK = 0xB0
+_VK_MEDIA_PREV_TRACK = 0xB1
+_VK_VOLUME_UP        = 0xAF
+_VK_VOLUME_DOWN      = 0xAE
+_VK_VOLUME_MUTE      = 0xAD
+
+
+def _send_media_key(vk_code: int) -> bool:
+    if not IS_WIN:
+        return False
+    try:
+        import ctypes
+        KEYEVENTF_EXTENDEDKEY = 0x0001
+        KEYEVENTF_KEYUP       = 0x0002
+        ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_EXTENDEDKEY, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_spotify_running():
+    """Se o Spotify não estiver aberto, inicia minimizado na bandeja antes de mandar a tecla de mídia."""
+    if not PSUTIL_OK:
+        return
+    try:
+        running = any("spotify" in (p.info.get("name") or "").lower() for p in psutil.process_iter(["name"]))
+        if not running:
+            open_app("spotify")
+            time.sleep(2.5)  # dá tempo do app subir antes de mandar o comando de mídia
+    except Exception:
+        pass
+
+
+def media_toggle_play() -> str:
+    """Toca/pausa a música atual (Spotify ou o player que estiver com foco de mídia)."""
+    _ensure_spotify_running()
+    if _send_media_key(_VK_MEDIA_PLAY_PAUSE):
+        return "🎵 Play/pause enviado."
+    return "⚠️  Controle de mídia só funciona no Windows por enquanto."
+
+
+def media_next_track() -> str:
+    if _send_media_key(_VK_MEDIA_NEXT_TRACK):
+        return "⏭️  Próxima faixa."
+    return "⚠️  Controle de mídia só funciona no Windows por enquanto."
+
+
+def media_prev_track() -> str:
+    if _send_media_key(_VK_MEDIA_PREV_TRACK):
+        return "⏮️  Faixa anterior."
+    return "⚠️  Controle de mídia só funciona no Windows por enquanto."
+
+
+# ══════════════════════════════════════════════════════
+#  PASTAS CONHECIDAS
+# ══════════════════════════════════════════════════════
+
+_FOLDER_ALIASES = {
+    "downloads": "~/Downloads", "download": "~/Downloads",
+    "documentos": "~/Documents", "documents": "~/Documents",
+    "área de trabalho": "~/Desktop", "area de trabalho": "~/Desktop",
+    "desktop": "~/Desktop", "área": "~/Desktop",
+    "imagens": "~/Pictures", "fotos": "~/Pictures", "pictures": "~/Pictures",
+    "vídeos": "~/Videos", "videos": "~/Videos",
+    "músicas": "~/Music", "musicas": "~/Music", "music": "~/Music",
+}
+
+
+def open_folder(name: str) -> str:
+    key  = name.strip().lower().rstrip(".")
+    path = _FOLDER_ALIASES.get(key, name)
+    p = _expand(path)
+    if not os.path.isdir(p):
+        return f"❌ Não encontrei a pasta '{name}'."
+    try:
+        if IS_WIN:
+            os.startfile(p)
+        elif IS_MAC:
+            os.system(f'open "{p}"')
+        else:
+            subprocess.Popen(["xdg-open", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"📂 Abrindo a pasta: {os.path.basename(p) or p}"
+    except Exception as e:
+        return f"❌ Erro: {e}"
+
+
+# ══════════════════════════════════════════════════════
 #  CLIPBOARD
 # ══════════════════════════════════════════════════════
 
@@ -669,6 +791,11 @@ def interpret_system_command(text: str) -> tuple[str, str] | None:
     if m:
         return ("create_folder", m.group(1).strip())
 
+    # ── Abrir pasta conhecida (Downloads, Documentos, etc.) ──
+    m = re.search(r"(?:abre|abrir|abra|mostra|mostrar)\s+(?:a\s+)?pasta\s+(?:de\s+)?(.+)", t)
+    if m:
+        return ("open_folder", m.group(1).strip().rstrip("."))
+
     # ── Abrir app ──
     m = re.search(r"(?:abre|abrir|abra|abrindo|liga|iniciar?)\s+(?:o\s+|a\s+)?(?:app\s+|programa\s+|aplicativo\s+)?(.+)", t)
     if m:
@@ -681,14 +808,35 @@ def interpret_system_command(text: str) -> tuple[str, str] | None:
     if m:
         return ("open_url", m.group(1).strip())
 
-    # ── Tocar música (arquivo local ou pesquisa) ──
+    # ── Pausar / despausar música (funciona com o player em 2º plano) ──
+    if re.search(r"\b(?:pausa|pause|despausa|despausar|continua\s+a\s+m[úu]sica|retoma\s+a\s+m[úu]sica)\b", t):
+        return ("media_toggle", "")
+
+    # ── Próxima / faixa anterior ──
+    if re.search(r"(?:pr[óo]xima\s+m[úu]sica|pula\s+(?:a\s+)?m[úu]sica|próxima\s+faixa|next\s+track)", t):
+        return ("media_next", "")
+    if re.search(r"(?:m[úu]sica\s+anterior|volta\s+(?:a\s+)?m[úu]sica|faixa\s+anterior|previous\s+track)", t):
+        return ("media_prev", "")
+
+    # ── Tocar música (Spotify) ──
     m = re.search(r"(?:toca|tocar|play|reproduz(?:ir)?|coloca)\s+(?:a\s+m[úu]sica\s+|o\s+som\s+|a\s+m[úu]sica\s+)?(?:do\s+|de\s+|da\s+)?(.+)", t)
     if m:
-        return ("play_music", m.group(1).strip().rstrip(".!"))
+        arg = m.group(1).strip().rstrip(".!")
+        if arg in ("", "algo", "alguma coisa", "musica", "música", "alguma música", "qualquer coisa", "spotify", "alguma coisa aí", "alguma coisa ai"):
+            return ("media_toggle", "")
+        return ("open_spotify", arg)
 
     # ── Parar música ──
     if re.search(r"(?:para|parar|para\s+a\s+m[úu]sica|stop|silenci(?:a|ar)|cancela?\s+m[úu]sica)", t):
         return ("stop_music", "")
+
+    # ── Desligar / reiniciar / hibernar o PC ──
+    if re.search(r"(?:desliga|desligar)\s+(?:o\s+)?(?:pc|computador|windows|meu\s+pc)", t):
+        return ("shutdown", "")
+    if re.search(r"(?:reinicia|reiniciar)\s+(?:o\s+)?(?:pc|computador|windows|meu\s+pc)", t):
+        return ("restart", "")
+    if re.search(r"(?:hiberna|hibernar)\s+(?:o\s+)?(?:pc|computador|meu\s+pc)", t):
+        return ("hibernate", "")
 
     # ── Volume ──
     m = re.search(r"(?:volume|som)\s+(?:para\s+|em\s+)?(\d+)%?", t)

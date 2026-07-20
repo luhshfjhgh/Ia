@@ -86,6 +86,16 @@ def get_user_by_username(username: str) -> Optional[dict]:
     return rows[0] if rows else None
 
 
+def get_user_by_id(user_id: str) -> Optional[dict]:
+    r = requests.get(
+        _url("users"), headers=_headers(),
+        params={"id": f"eq.{user_id}", "select": "*"}, timeout=15,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    return rows[0] if rows else None
+
+
 def count_users() -> int:
     r = requests.get(
         _url("users"),
@@ -162,10 +172,72 @@ def list_users() -> List[dict]:
     """Usado pelo /admin_usuarios (apenas admins)."""
     r = requests.get(
         _url("users"), headers=_headers(),
-        params={"select": "id,username,name,role,created_at,last_login"}, timeout=15,
+        params={"select": "id,username,name,role,created_at,last_login,is_banned,daily_message_count"}, timeout=15,
     )
     r.raise_for_status()
     return r.json()
+
+
+# ── Auditoria ─────────────────────────────────────────────────────────
+def log_event(user_id: Optional[str], username: str, event: str, details: str = "",
+              ip: str = "", location: str = "") -> None:
+    """Nunca levanta exceção — auditoria não pode derrubar o app se falhar."""
+    try:
+        payload = {
+            "user_id": user_id, "username": username, "event": event,
+            "details": details, "ip": ip, "location": location,
+        }
+        requests.post(_url("audit_log"), headers=_headers(), json=payload, timeout=10)
+    except Exception:
+        pass
+
+
+def get_audit_log(limit: int = 30) -> List[dict]:
+    r = requests.get(
+        _url("audit_log"), headers=_headers(),
+        params={"select": "*", "order": "created_at.desc", "limit": limit}, timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+# ── Ban por conta (independe do PC — segue o usuário) ──────────────────
+def ban_account(user_id: str, reason: str, until_iso: Optional[str] = None) -> None:
+    fields = {"is_banned": True, "ban_reason": reason}
+    if until_iso:
+        fields["ban_until"] = until_iso
+    update_user(user_id, fields)
+
+
+def unban_account(user_id: str) -> None:
+    update_user(user_id, {"is_banned": False, "ban_reason": None, "ban_until": None})
+
+
+# ── Tentativas de login falhas ──────────────────────────────────────────
+def increment_failed_login(user_id: str, current: int) -> int:
+    new_count = (current or 0) + 1
+    update_user(user_id, {"failed_login_count": new_count})
+    return new_count
+
+
+def reset_failed_login(user_id: str) -> None:
+    update_user(user_id, {"failed_login_count": 0})
+
+
+# ── Cota diária de mensagens ─────────────────────────────────────────────
+def bump_daily_message_count(user: dict) -> tuple[int, int]:
+    """Incrementa o contador diário (resetando se mudou o dia).
+    Retorna (contagem_atual, limite)."""
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    reset_at = user.get("daily_message_reset_at")
+    count = user.get("daily_message_count") or 0
+    limit = user.get("daily_message_limit") or 200
+    if reset_at != today:
+        count = 0
+    count += 1
+    update_user(user["id"], {"daily_message_count": count, "daily_message_reset_at": today})
+    return count, limit
 
 
 # ── Recuperação de senha por e-mail (via EmailJS REST API) ───────────────
@@ -188,5 +260,33 @@ def send_reset_email(to_email: str, to_name: str, code: str) -> tuple[bool, str]
         if r.status_code == 200:
             return True, "E-mail enviado!"
         return False, f"EmailJS retornou {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+EMAILJS_TEMPLATE_ALERT = _get("EMAILJS_TEMPLATE_ALERT")  # opcional — alerta de segurança
+
+
+def send_security_alert_email(to_email: str, to_name: str, message: str) -> tuple[bool, str]:
+    """Alerta de segurança (várias senhas erradas, ban aplicado, etc).
+    Usa um template separado do de recuperação de senha — se você não
+    tiver criado um template 'alert' no EmailJS ainda, isso só é
+    ignorado silenciosamente (não quebra o login)."""
+    if not (EMAILJS_SERVICE_ID and EMAILJS_TEMPLATE_ALERT and EMAILJS_PUBLIC_KEY):
+        return False, "EMAILJS_TEMPLATE_ALERT não configurado no .env."
+    payload = {
+        "service_id": EMAILJS_SERVICE_ID,
+        "template_id": EMAILJS_TEMPLATE_ALERT,
+        "user_id": EMAILJS_PUBLIC_KEY,
+        "accessToken": EMAILJS_PRIVATE_KEY,
+        "template_params": {
+            "to_email": to_email,
+            "to_name": to_name,
+            "alert_message": message,
+        },
+    }
+    try:
+        r = requests.post("https://api.emailjs.com/api/v1.0/email/send", json=payload, timeout=15)
+        return (r.status_code == 200), f"HTTP {r.status_code}"
     except Exception as e:
         return False, str(e)

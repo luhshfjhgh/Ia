@@ -110,6 +110,9 @@ import huggingface_client as hf_client
 # ── Auto-atualização via GitHub (/manutencao) ──────────────────────────
 import updater as nox_updater
 
+# ── Controle real do Spotify via Web API (/spotify_login) ─────────────
+import spotify_client
+
 # ── Sistema Multiagente ───────────────────────────────────────────
 try:
     from core.orchestrator        import orchestrator as _ORCHESTRATOR
@@ -1922,6 +1925,15 @@ class NoxAI:
         self.history.append({"role": "user", "content": stripped})
         self._extract_name(stripped)
         self._extract_facts(stripped)
+
+        # ── Cota diária de mensagens (não vale pra admin) ──
+        if self.account_user_id:
+            pode, usado, limite = nox_auth.check_and_bump_daily_limit(self.account_user_id, self.account_role)
+            if not pode:
+                aviso = f"🚫 Você atingiu o limite diário de {limite} mensagens. Volta amanhã ou peça pra um admin aumentar sua cota."
+                self.typing_effect(aviso)
+                return None
+
         self.print_system("Processando...")
         response = self.call_api(stripped)
         self.history.append({"role": "assistant", "content": response})
@@ -2095,8 +2107,14 @@ class NoxAI:
             "/logout":         self._cmd_logout,
             "/historico_conta":self._cmd_historico_conta,
             "/manutencao":     self._cmd_manutencao,
+            "/spotify_login":  self._cmd_spotify_login,
             "/teste_atualizacao": self._cmd_teste_atualizacao,
             "/admin_usuarios": self._cmd_admin_usuarios,
+            "/banir_conta":    self._cmd_banir_conta,
+            "/desbanir_conta": self._cmd_desbanir_conta,
+            "/log_auditoria":  self._cmd_log_auditoria,
+            "/exportar":       self._cmd_exportar,
+            "/resumo":         self._cmd_resumo,
         }
         dispatch.get(cmd_lower, lambda: self.print_nox("Comando desconhecido. Digite /ajuda."))()
 
@@ -2413,7 +2431,13 @@ class NoxAI:
 {C.WHITE}  /historico_conta {C.GRAY}— Histórico de mensagens salvas nesta conta
 {C.WHITE}  /logout          {C.GRAY}— Sai da conta atual e volta à tela de login
 {C.WHITE}  /manutencao      {C.GRAY}— Verifica e instala atualizações da NOX (GitHub)
+{C.WHITE}  /spotify_login   {C.GRAY}— (requer Spotify Premium) toca música específica por voz
 {C.WHITE}  /admin_usuarios  {C.GRAY}— Lista contas cadastradas (apenas admin)
+{C.WHITE}  /banir_conta     {C.GRAY}— Bane uma conta (independe do PC, apenas admin)
+{C.WHITE}  /desbanir_conta  {C.GRAY}— Remove o ban de uma conta (apenas admin)
+{C.WHITE}  /log_auditoria   {C.GRAY}— Histórico de logins e ações (apenas admin)
+{C.WHITE}  /exportar        {C.GRAY}— Exporta sua conversa salva pra um arquivo .txt
+{C.WHITE}  /resumo          {C.GRAY}— A IA resume suas últimas mensagens salvas
 {C.GRAY}  Esqueceu a senha? Escolha a opção 3 na tela de login.{C.RESET}
 
 {C.CYAN}{C.BOLD}  ── 🤖 Sistema Multiagente (v4.0) ────────────────────────────{C.RESET}
@@ -2659,6 +2683,94 @@ class NoxAI:
             print(f"  {C.CYAN}{u.get('username','?'):<20}{C.RESET} {role_tag}")
         print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
 
+    def _cmd_banir_conta(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        alvo = input("  Usuário a banir: ").strip()
+        if alvo == self.account_username:
+            self.print_nox("Você não pode banir a própria conta.")
+            return
+        motivo = input("  Motivo: ").strip() or "Não especificado"
+        horas_raw = input("  Duração em horas (Enter = indefinido): ").strip()
+        horas = int(horas_raw) if horas_raw.isdigit() else None
+        ok, msg = nox_auth.admin_ban_account(alvo, motivo, horas)
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
+        if ok:
+            nox_auth.log_event(self.account_user_id, self.account_username, "admin_ban_account", f"alvo={alvo}; motivo={motivo}")
+
+    def _cmd_desbanir_conta(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        alvo = input("  Usuário a desbanir: ").strip()
+        ok, msg = nox_auth.admin_unban_account(alvo)
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
+        if ok:
+            nox_auth.log_event(self.account_user_id, self.account_username, "admin_unban_account", f"alvo={alvo}")
+
+    def _cmd_log_auditoria(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        logs = nox_auth.get_audit_log(30)
+        if not logs:
+            self.print_nox("Nenhum evento registrado ainda (ou Supabase não configurado).")
+            return
+        print(f"\n{C.PURPLE}{C.BOLD}  ╔══ LOG DE AUDITORIA (últimos {len(logs)}) ═══════╗{C.RESET}")
+        for ev in logs:
+            when = (ev.get("created_at") or "")[:16].replace("T", " ")
+            print(f"  {C.GRAY}{when}{C.RESET}  {C.CYAN}{ev.get('username','?'):<14}{C.RESET} {C.WHITE}{ev.get('event','?')}{C.RESET}"
+                  + (f"  {C.GRAY}({ev.get('details')}){C.RESET}" if ev.get("details") else "")
+                  + (f"  {C.GRAY}[{ev.get('ip')} · {ev.get('location')}]{C.RESET}" if ev.get("ip") else ""))
+        print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
+
+    def _cmd_exportar(self):
+        """Exporta o histórico salvo da conta pra um arquivo .txt."""
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        rows = nox_auth.get_conversation_history(self.account_user_id, limit=1000)
+        if not rows:
+            self.print_nox("Nenhuma mensagem salva ainda pra exportar.")
+            return
+        fname = f"nox_conversa_{self.account_username}_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        try:
+            with open(fname, "w", encoding="utf-8") as f:
+                f.write(f"Conversa exportada — conta: {self.account_username}\n")
+                f.write(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+                f.write("=" * 60 + "\n\n")
+                for r in rows:
+                    quem = "Você" if r["role"] == "user" else "Nox"
+                    f.write(f"[{r.get('created_at','')[:16].replace('T',' ')}] {quem}: {r['content']}\n\n")
+            self.print_nox(f"📄 Conversa exportada para: {os.path.abspath(fname)}")
+        except Exception as e:
+            self.print_nox(f"❌ Erro ao exportar: {e}")
+
+    def _cmd_resumo(self):
+        """Pede pra IA resumir as últimas N mensagens da conversa salva."""
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        try:
+            n = int(input("  Resumir quantas mensagens? (Enter=20): ").strip() or "20")
+        except ValueError:
+            n = 20
+        rows = nox_auth.get_conversation_history(self.account_user_id, limit=n)
+        if not rows:
+            self.print_nox("Nada pra resumir ainda.")
+            return
+        texto = "\n".join(f"{'Você' if r['role']=='user' else 'Nox'}: {r['content']}" for r in rows)
+        self.print_nox("🧠 Resumindo...")
+        try:
+            resumo = self.call_api(
+                f"Resuma de forma objetiva e em português os pontos principais desta conversa, "
+                f"em no máximo 6 tópicos:\n\n{texto}"
+            )
+            self.print_nox(resumo)
+        except Exception as e:
+            self.print_nox(f"❌ Erro ao gerar resumo: {e}")
+
     def _cmd_teste_atualizacao(self):
         """Comando de teste — só existe pra provar que o /manutencao funcionou."""
         v = nox_updater.get_local_version()
@@ -2666,6 +2778,31 @@ class NoxAI:
         print(f"  🎉 Esse comando só existe na versão {C.CYAN}{v}{C.RESET}!")
         print(f"  Se você está vendo isso, o /manutencao funcionou. ✅")
         print(f"{C.GREEN}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
+
+    def _cmd_spotify_login(self):
+        self.print_nox(
+            "⚠️ Isso só funciona com Spotify Premium (exigência da própria API do Spotify, "
+            "não é limitação da Nox). Com conta grátis, use só os comandos de play/pause/"
+            "próxima/anterior (funcionam sempre) ou 'toca [música]' pra abrir a busca no app."
+        )
+        try:
+            c = input(f"  {C.YELLOW}Você tem Spotify Premium e quer configurar mesmo assim? (s/n): {C.RESET}").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if c != "s":
+            return
+        if not spotify_client.is_app_configured():
+            self.print_nox(
+                "⚠️ Configure SPOTIFY_CLIENT_ID e SPOTIFY_CLIENT_SECRET no .env primeiro "
+                "(veja o passo a passo no .env.example)."
+            )
+            return
+        if spotify_client.is_logged_in():
+            c2 = input(f"  {C.YELLOW}Você já está logado no Spotify. Fazer login de novo? (s/n): {C.RESET}").strip().lower()
+            if c2 != "s":
+                return
+        ok, msg = spotify_client.run_oauth_setup(progress_cb=self.print_system)
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
 
     def _cmd_manutencao(self):
         """
@@ -2716,6 +2853,7 @@ class NoxAI:
             self.print_system("Substituindo arquivos (memória, contas e .env NÃO são tocados)...")
             n = nox_updater.apply_update(new_files, progress_cb=self.print_system)
             nox_updater.set_local_version(remote_v)
+            nox_auth.log_event(self.account_user_id, self.account_username, "manutencao_usada", f"versao={remote_v}")
             nox_updater.cleanup(tmp_dir)
 
             self.print_nox(f"✅ Atualização concluída! {n} arquivo(s) substituído(s).")
@@ -3072,18 +3210,33 @@ class NoxAI:
 
     def _execute_system_action(self, action: str, arg: str) -> str | None:
         """Executa uma ação de controle do sistema e retorna mensagem."""
-        _vol_step = 10
+        # Ações que desligam/reiniciam/hibernam o PC SEMPRE pedem confirmação
+        # antes de executar — não importa se vieram de texto ou de voz.
+        if action in ("shutdown", "restart", "hibernate"):
+            rotulo = {"shutdown": "DESLIGAR", "restart": "REINICIAR", "hibernate": "HIBERNAR"}[action]
+            try:
+                c = input(f"  {C.YELLOW}⚠️  Confirma {rotulo} o computador agora? (s/n): {C.RESET}").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                return "Cancelado."
+            if c != "s":
+                return "Cancelado — o computador continua ligado."
+
         action_map = {
             "delete":         lambda: sc.file_delete(arg),
             "create_file":    lambda: sc.file_create(arg),
             "create_folder":  lambda: sc.folder_create(arg),
             "open_app":       lambda: sc.open_app(arg),
             "open_url":       lambda: sc.open_url(arg),
+            "open_folder":    lambda: sc.open_folder(arg),
+            "open_spotify":   lambda: sc.open_spotify(arg),
             "play_music":     lambda: sc.play_music(arg),
             "stop_music":     lambda: sc.stop_music(),
+            "media_toggle":   lambda: sc.media_toggle_play(),
+            "media_next":     lambda: sc.media_next_track(),
+            "media_prev":     lambda: sc.media_prev_track(),
             "set_volume":     lambda: sc.set_volume(int(arg) if arg.isdigit() else 50),
-            "volume_up":      lambda: sc.set_volume(min(100, 50 + _vol_step)),  # simplificado
-            "volume_down":    lambda: sc.set_volume(max(0, 50 - _vol_step)),
+            "volume_up":      lambda: sc._send_media_key(sc._VK_VOLUME_UP) and "🔊 Volume aumentado." or "⚠️ Falhou.",
+            "volume_down":    lambda: sc._send_media_key(sc._VK_VOLUME_DOWN) and "🔉 Volume diminuído." or "⚠️ Falhou.",
             "mute":           lambda: sc.mute_volume(),
             "screenshot":     lambda: sc.screenshot(),
             "lock":           lambda: sc.lock_screen(),
@@ -3093,6 +3246,9 @@ class NoxAI:
             "kill_proc":      lambda: sc.kill_process(arg),
             "list_dir":       lambda: "\n" + sc.folder_list(arg or "."),
             "clipboard_copy": lambda: sc.clipboard_copy(arg),
+            "shutdown":       lambda: sc.shutdown(),
+            "restart":        lambda: sc.restart(),
+            "hibernate":      lambda: sc.hibernate(),
         }
         fn = action_map.get(action)
         if fn:
