@@ -113,6 +113,12 @@ import updater as nox_updater
 # ── Controle real do Spotify via Web API (/spotify_login) ─────────────
 import spotify_client
 
+# ── Galeria flutuante 3D controlada por gesto de mão ────────────────
+import floating_gallery
+
+# ── Sistema de Planos Premium (Pix) ────────────────────────────────
+import payments
+
 # ── Sistema Multiagente ───────────────────────────────────────────
 try:
     from core.orchestrator        import orchestrator as _ORCHESTRATOR
@@ -1966,6 +1972,21 @@ class NoxAI:
         lower = stripped.lower().split()[0]
         if lower in self._aliases:
             stripped = self._aliases[lower]
+
+        # ── Comandos de Planos Premium na forma "plan free", "attach
+        # arquivo.pdf", "status pagamento" (sem barra), conforme pedido ──
+        low_full = stripped.lower().strip()
+        if low_full in ("plan free", "plano free"):
+            stripped = "/plano_free"
+        elif low_full in ("plan basic", "plano basic", "plan basico", "plano basico"):
+            stripped = "/plano_basico"
+        elif low_full in ("plan pro", "plano pro"):
+            stripped = "/plano_pro"
+        elif low_full in ("status pagamento", "status_pagamento"):
+            stripped = "/status_pagamento"
+        elif low_full.startswith("attach "):
+            stripped = "/anexar " + stripped.split(" ", 1)[1]
+
         if stripped.startswith("/"):
             self._handle_command(stripped)
             return None
@@ -2111,6 +2132,16 @@ class NoxAI:
             "/teste_atualizacao": self._cmd_teste_atualizacao,
             "/admin_usuarios": self._cmd_admin_usuarios,
             "/banir_conta":    self._cmd_banir_conta,
+            "/testar_gatilho": self._cmd_testar_gatilho,
+            "/premium":            self._cmd_premium,
+            "/plano_free":         self._cmd_plano_free,
+            "/plano_basico":       self._cmd_plano_basico,
+            "/plano_pro":          self._cmd_plano_pro,
+            "/anexar":             self._cmd_anexar,
+            "/status_pagamento":   self._cmd_status_pagamento,
+            "/pagamentos_pendentes": self._cmd_pagamentos_pendentes,
+            "/confirmar_pagamento":  self._cmd_confirmar_pagamento,
+            "/rejeitar_pagamento":   self._cmd_rejeitar_pagamento,
             "/desbanir_conta": self._cmd_desbanir_conta,
             "/log_auditoria":  self._cmd_log_auditoria,
             "/exportar":       self._cmd_exportar,
@@ -2434,6 +2465,18 @@ class NoxAI:
 {C.WHITE}  /spotify_login   {C.GRAY}— (requer Spotify Premium) toca música específica por voz
 {C.WHITE}  /admin_usuarios  {C.GRAY}— Lista contas cadastradas (apenas admin)
 {C.WHITE}  /banir_conta     {C.GRAY}— Bane uma conta (independe do PC, apenas admin)
+{C.WHITE}  /testar_gatilho  {C.GRAY}— Testa se um texto dispararia ban, SEM banir de verdade (admin)
+
+{C.CYAN}{C.BOLD}  ── 💎 Planos Premium ────────────────────────────────────────{C.RESET}
+{C.WHITE}  /premium             {C.GRAY}— Abre a tela com os 3 planos (Free/Básico/Pro)
+{C.WHITE}  /plano_free          {C.GRAY}— Ativa o plano Free (ou "plan free")
+{C.WHITE}  /plano_basico        {C.GRAY}— Assina o Básico, abre tela de pagamento Pix
+{C.WHITE}  /plano_pro           {C.GRAY}— Assina o Pro, abre tela de pagamento Pix
+{C.WHITE}  /anexar <arquivo>    {C.GRAY}— Envia comprovante pra análise (ou "attach arquivo.png")
+{C.WHITE}  /status_pagamento    {C.GRAY}— Vê o status do seu plano/pagamento
+{C.WHITE}  /pagamentos_pendentes{C.GRAY}— Lista comprovantes aguardando revisão (admin)
+{C.WHITE}  /confirmar_pagamento {C.GRAY}— Aprova o comprovante mais recente de uma conta (admin)
+{C.WHITE}  /rejeitar_pagamento  {C.GRAY}— Rejeita o comprovante mais recente de uma conta (admin)
 {C.WHITE}  /desbanir_conta  {C.GRAY}— Remove o ban de uma conta (apenas admin)
 {C.WHITE}  /log_auditoria   {C.GRAY}— Histórico de logins e ações (apenas admin)
 {C.WHITE}  /exportar        {C.GRAY}— Exporta sua conversa salva pra um arquivo .txt
@@ -2682,6 +2725,125 @@ class NoxAI:
             role_tag = f"{C.YELLOW}👑 admin{C.RESET}" if u.get("role") == "admin" else f"{C.GRAY}usuário{C.RESET}"
             print(f"  {C.CYAN}{u.get('username','?'):<20}{C.RESET} {role_tag}")
         print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
+
+    def _cmd_premium(self):
+        """Abre a janela com os 3 cartões de planos (Free/Básico/Pro)."""
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery", "premium_app.py")
+        try:
+            subprocess.Popen([sys.executable, script, str(self.account_user_id or ""), self.account_username or ""])
+            self.print_nox("🚀 Abrindo a tela de planos...")
+        except Exception as e:
+            self.print_nox(f"❌ Erro ao abrir a tela de planos: {e}")
+
+    def _cmd_plano_free(self):
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        ok, msg = payments.start_subscription(self.account_user_id, self.account_username, "free")
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
+
+    def _abrir_pagamento(self, plan_key: str):
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        ok, msg = payments.start_subscription(self.account_user_id, self.account_username, plan_key)
+        self.print_nox(msg)
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery", "payment_app.py")
+        try:
+            subprocess.Popen([sys.executable, script, plan_key, str(self.account_user_id), self.account_username or ""])
+        except Exception as e:
+            self.print_nox(f"❌ Erro ao abrir a tela de pagamento: {e}")
+
+    def _cmd_plano_basico(self):
+        self._abrir_pagamento("basic")
+
+    def _cmd_plano_pro(self):
+        self._abrir_pagamento("pro")
+
+    def _cmd_anexar(self):
+        """/anexar <caminho_do_arquivo> — envia o comprovante pra análise."""
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        partes = self._last_raw_cmd.split(" ", 1)
+        if len(partes) < 2 or not partes[1].strip():
+            self.print_nox("Uso: /anexar <caminho_do_arquivo.png|.jpg|.jpeg|.pdf>")
+            return
+        file_path = partes[1].strip().strip('"')
+
+        user = None
+        try:
+            import supabase_client as _sb
+            user = _sb.get_user_by_id(self.account_user_id) if _sb.is_configured() else None
+        except Exception:
+            pass
+        plan_key = (user or {}).get("plan") if user else None
+        if plan_key not in ("basic", "pro"):
+            self.print_nox(
+                "Escolha um plano pago primeiro (/plano_basico ou /plano_pro) antes de anexar o comprovante."
+            )
+            return
+
+        self.print_system("Analisando comprovante...")
+        ok, msg = payments.attach_receipt(self.account_user_id, self.account_username, plan_key, file_path)
+        self.print_nox(("" if ok else "❌ ") + msg)
+        if ok:
+            nox_auth.log_event(self.account_user_id, self.account_username, "receipt_attached_terminal", file_path)
+
+    def _cmd_status_pagamento(self):
+        if not self.account_user_id:
+            self.print_nox("Nenhuma conta ativa.")
+            return
+        self.print_nox(payments.get_status(self.account_user_id))
+
+    def _cmd_pagamentos_pendentes(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        pendentes = payments.list_pending()
+        if not pendentes:
+            self.print_nox("Nenhum comprovante aguardando confirmação.")
+            return
+        print(f"\n{C.PURPLE}{C.BOLD}  ╔══ PAGAMENTOS PENDENTES ({len(pendentes)}) ══════╗{C.RESET}")
+        for r in pendentes:
+            print(f"  {C.CYAN}{r.get('username','?'):<14}{C.RESET} plano={r.get('plan')}  "
+                  f"valor={r.get('valor') or '?'}  data={r.get('data_pagamento') or '?'}  "
+                  f"{C.GRAY}arquivo={r.get('file_name')}{C.RESET}")
+        print(f"{C.PURPLE}{C.BOLD}  ╚════════════════════════════════════════════╝{C.RESET}\n")
+
+    def _cmd_confirmar_pagamento(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        alvo = input("  Usuário a confirmar: ").strip()
+        ok, msg = payments.confirm_latest_receipt(alvo, approve=True, reviewer=self.account_username or "admin")
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
+
+    def _cmd_rejeitar_pagamento(self):
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        alvo = input("  Usuário a rejeitar: ").strip()
+        ok, msg = payments.confirm_latest_receipt(alvo, approve=False, reviewer=self.account_username or "admin")
+        self.print_nox(("✅ " if ok else "❌ ") + msg)
+
+    def _cmd_testar_gatilho(self):
+        """Testa se um texto DISPARARIA o sistema de ban, sem aplicar
+        ban nenhum de verdade. Só pra admin verificar os padrões."""
+        if not self._is_admin():
+            self.print_nox("🔒 Esse comando é só para administradores.")
+            return
+        texto = input("  Texto a testar (não é enviado pra IA nem banido de verdade): ").strip()
+        if not texto:
+            return
+        resultado = scan_message(texto)
+        if resultado:
+            trecho, categoria = resultado
+            print(f"\n{C.RED}{C.BOLD}  ⚠️  ISSO DISPARARIA UM BAN{C.RESET}")
+            print(f"  {C.GRAY}Categoria: {categoria}{C.RESET}")
+            print(f"  {C.GRAY}Trecho detectado: \"{trecho}\"{C.RESET}\n")
+        else:
+            print(f"\n{C.GREEN}  ✅ Esse texto NÃO dispararia o ban.{C.RESET}\n")
 
     def _cmd_banir_conta(self):
         if not self._is_admin():
@@ -3229,6 +3391,8 @@ class NoxAI:
             "open_url":       lambda: sc.open_url(arg),
             "open_folder":    lambda: sc.open_folder(arg),
             "open_spotify":   lambda: sc.open_spotify(arg),
+            "gallery_images": lambda: floating_gallery.open_screenshots_gallery(progress_cb=self.print_system),
+            "gallery_files":  lambda: floating_gallery.open_downloads_gallery(progress_cb=self.print_system),
             "play_music":     lambda: sc.play_music(arg),
             "stop_music":     lambda: sc.stop_music(),
             "media_toggle":   lambda: sc.media_toggle_play(),
@@ -4220,7 +4384,14 @@ class NoxAI:
 
 if __name__ == "__main__":
     try:
-        run_splash()
+        import floating_gallery as _fg
+        if not _fg._pyqt_installed():
+            _fg._install_pyqt()
+        if _fg._pyqt_installed():
+            _splash_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gallery", "splash_app.py")
+            subprocess.run([sys.executable, _splash_script])
+        else:
+            run_splash()  # fallback: splash antigo em pygame
     except Exception as e:
         print(f"Erro ao iniciar splash screen: {e}")
 

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent !important;
+    overflow: hidden;
+    font-family: -apple-system, Segoe UI, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  #stage {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    perspective: 3000px;
+    cursor: grab;
+  }
+  #tilt { transform-style: preserve-3d; transform: rotateX(-7deg); }
+  #ring {
+    position: relative;
+    width: var(--imgW); height: var(--imgH);
+    transform-style: preserve-3d;
+    transition: transform 0.05s linear;
+  }
+  .face {
+    position: absolute; inset: 0;
+    border-radius: 22px;
+    overflow: hidden;
+    backface-visibility: hidden;
+    background-size: cover; background-position: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  }
+  #hud {
+    position: fixed; top: 10px; left: 14px;
+    color: rgba(230,215,255,0.75);
+    font-size: 12px; letter-spacing: 0.3px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    pointer-events: none;
+  }
+  #closeBtn {
+    position: fixed; top: 8px; right: 10px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(30,20,45,0.55); color: #d8c8ff;
+    border: 1px solid rgba(190,140,255,0.4);
+    font-size: 15px; line-height: 26px; text-align: center;
+    cursor: pointer; -webkit-app-region: no-drag;
+  }
+  #closeBtn:hover { background: rgba(120,60,200,0.7); }
+  #camPreview {
+    position: fixed; bottom: 10px; right: 10px;
+    width: 90px; height: 68px; border-radius: 8px;
+    opacity: 0.55; border: 1px solid rgba(190,140,255,0.4);
+    transform: scaleX(-1);
+  }
+</style>
+</head>
+<body>
+  <div id="hud">🖐️ gire a mão pra girar · beliscar os dedos pra zoom · <span id="handStatus">procurando mão...</span></div>
+  <div id="closeBtn" onclick="window.noxClose && window.noxClose()">✕</div>
+  <div id="stage">
+    <div id="tilt">
+      <div id="ring"></div>
+    </div>
+  </div>
+  <video id="camPreview" autoplay muted playsinline></video>
+  <video id="camRaw" autoplay muted playsinline style="display:none"></video>
+  <canvas id="camCanvas" style="display:none"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<!--NOX_DATA_INJECTION_POINT-->
+<script>
+// ============================================================
+//  Dados injetados pelo Python: lista de imagens (file:// ou base64)
+//  window.NOX_IMAGES = ["file:///C:/.../foto1.png", ...]
+//  window.NOX_TITLE  = "Suas capturas de tela"
+// ============================================================
+const images = (window.NOX_IMAGES && window.NOX_IMAGES.length) ? window.NOX_IMAGES : [];
+const ring   = document.getElementById("ring");
+const count  = Math.max(images.length, 1);
+
+const imageWidth  = 260;
+const imageHeight = 260;
+const spacingFactor = 1 + 3 * 0.15;
+const angleStep = 360 / count;
+const radius = (imageWidth * spacingFactor) / (2 * Math.tan(Math.PI / count));
+
+document.documentElement.style.setProperty("--imgW", imageWidth + "px");
+document.documentElement.style.setProperty("--imgH", imageHeight + "px");
+
+if (images.length === 0) {
+  ring.innerHTML = '<div class="face" style="display:flex;align-items:center;justify-content:center;background:#222;color:#aaa;font-size:14px;">Nenhuma imagem encontrada</div>';
+} else {
+  images.forEach((src, i) => {
+    const item = document.createElement("div");
+    item.style.position = "absolute";
+    item.style.inset = "0";
+    item.style.transformStyle = "preserve-3d";
+    item.style.transform = `rotateY(${i * angleStep}deg) translateZ(${radius}px)`;
+    item.innerHTML = `<div class="face" style="background-image:url('${src}')"></div>`;
+    ring.appendChild(item);
+  });
+}
+
+// ── Estado de rotação/zoom + auto-rotação suave ─────────────────────
+let rotY = 0, vel = 6, scale = 1.0;
+let lastTs = 0;
+
+function applyTransform() {
+  ring.style.transform = `translateZ(${-radius}px) rotateY(${rotY}deg)`;
+  document.getElementById("tilt").style.transform = `rotateX(-7deg) scale(${scale})`;
+}
+
+function loop(ts) {
+  const dt = lastTs ? (ts - lastTs) / 1000 : 0;
+  lastTs = ts;
+  if (!handActive && !dragging) {
+    rotY += vel * dt;
+  }
+  applyTransform();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── Arraste com mouse (fallback sem webcam) ─────────────────────────
+let dragging = false, lastX = 0;
+document.getElementById("stage").addEventListener("pointerdown", e => { dragging = true; lastX = e.clientX; });
+window.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  rotY += (e.clientX - lastX) * 0.4;
+  lastX = e.clientX;
+});
+window.addEventListener("pointerup", () => dragging = false);
+
+// ── Controle por gesto de mão (MediaPipe Hands) ──────────────────────
+let handActive = false;
+let lastHandX = null, lastPinchDist = null;
+const statusEl = document.getElementById("handStatus");
+
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function onHandsResults(results) {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    handActive = false;
+    lastHandX = null; lastPinchDist = null;
+    statusEl.textContent = "procurando mão...";
+    return;
+  }
+  handActive = true;
+  statusEl.textContent = "mão detectada ✅";
+  const lm = results.multiHandLandmarks[0];
+  const palm = lm[9];       // centro da palma (aprox.)
+  const thumb = lm[4];      // ponta do polegar
+  const index = lm[8];      // ponta do indicador
+
+  // Rotacao: desloca a mao horizontalmente -> gira o anel
+  if (lastHandX !== null) {
+    const dx = (palm.x - lastHandX) * -1; // espelhado (webcam)
+    rotY += dx * 260; // sensibilidade
+  }
+  lastHandX = palm.x;
+
+  // Zoom: distancia polegar-indicador -> beliscar/esticar
+  const pinch = dist(thumb, index);
+  if (lastPinchDist !== null) {
+    const delta = pinch - lastPinchDist;
+    scale += delta * 4.5;
+    scale = Math.min(Math.max(scale, 0.5), 2.5);
+  }
+  lastPinchDist = pinch;
+}
+
+async function startHandTracking() {
+  try {
+    const videoRaw = document.getElementById("camRaw");
+    const preview  = document.getElementById("camPreview");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 }, audio: false });
+    videoRaw.srcObject = stream;
+    preview.srcObject = stream;
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5,
+    });
+    hands.onResults(onHandsResults);
+
+    const camera = new Camera(videoRaw, {
+      onFrame: async () => { await hands.send({ image: videoRaw }); },
+      width: 320, height: 240,
+    });
+    camera.start();
+  } catch (e) {
+    statusEl.textContent = "sem webcam (usando só o mouse)";
+    console.warn("Webcam/hand tracking indisponível:", e);
+  }
+}
+startHandTracking();
+
+// ── Fechar com ESC ───────────────────────────────────────────────────
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape" && window.noxClose) window.noxClose();
+});
+</script>
+</body>
+</html>

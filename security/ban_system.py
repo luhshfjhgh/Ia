@@ -216,15 +216,13 @@ def check_ban() -> dict | None:
     if ban is None:
         return None
 
-    # Arquivo adulterado → trata como ban ativo por mais 24h
+    # Arquivo adulterado → renova o ban, mas GRAVA um prazo fixo
+    # (antes disso, ele recalculava "agora + 24h" a cada checagem,
+    # o que fazia o ban nunca expirar de verdade — parecia reaplicar
+    # toda vez que você só ia OLHAR quanto tempo faltava).
     if ban.get("__corrupted__"):
-        return {
-            "reason":    "Arquivo de ban adulterado — ban renovado automaticamente",
-            "trigger":   "Adulteração detectada",
-            "expires":   datetime.now() + timedelta(hours=24),
-            "banned_at": "?",
-            "corrupted": True,
-        }
+        _reban({}, fp, "Arquivo de ban adulterado — ban renovado automaticamente")
+        return check_ban()
 
     # Verifica assinatura do timestamp
     expires_str = ban.get("expires", "")
@@ -247,8 +245,29 @@ def check_ban() -> dict | None:
     }
 
 
+def _dev_mode_on() -> bool:
+    """Se NOX_DEV_MODE=1 no .env, a Nox não aplica bans NOVOS — usado só
+    pra testar o próprio sistema de ban sem travar o desenvolvimento.
+    Não afeta nem remove nenhum ban que já esteja gravado."""
+    val = os.environ.get("NOX_DEV_MODE", "")
+    if not val:
+        try:
+            for path in (".env", os.path.join(os.path.dirname(__file__), "..", ".env")):
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as f:
+                        for line in f:
+                            if line.strip().startswith("NOX_DEV_MODE="):
+                                val = line.strip().split("=", 1)[1]
+                    break
+        except Exception:
+            pass
+    return val.strip() == "1"
+
+
 def apply_ban(reason: str, trigger: str, hours: int = 24):
     """Aplica ban de N horas (mínimo 24h sempre)."""
+    if _dev_mode_on():
+        return  # modo de desenvolvimento — não aplica ban novo
     hours = max(hours, 24)
     fp    = _get_fingerprint()
     now   = datetime.now()

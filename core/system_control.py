@@ -674,21 +674,29 @@ def media_prev_track() -> str:
 # ══════════════════════════════════════════════════════
 
 _FOLDER_ALIASES = {
-    "downloads": "~/Downloads", "download": "~/Downloads",
-    "documentos": "~/Documents", "documents": "~/Documents",
-    "área de trabalho": "~/Desktop", "area de trabalho": "~/Desktop",
-    "desktop": "~/Desktop", "área": "~/Desktop",
-    "imagens": "~/Pictures", "fotos": "~/Pictures", "pictures": "~/Pictures",
-    "vídeos": "~/Videos", "videos": "~/Videos",
-    "músicas": "~/Music", "musicas": "~/Music", "music": "~/Music",
+    "downloads": "downloads", "download": "downloads",
+    "documentos": "documents", "documents": "documents",
+    "área de trabalho": "desktop", "area de trabalho": "desktop",
+    "desktop": "desktop", "área": "desktop",
+    "imagens": "pictures", "fotos": "pictures", "pictures": "pictures",
+    "vídeos": "videos", "videos": "videos",
+    "músicas": "music", "musicas": "music", "music": "music",
+    "capturas de tela": "screenshots", "screenshots": "screenshots",
 }
 
 
 def open_folder(name: str) -> str:
-    key  = name.strip().lower().rstrip(".")
-    path = _FOLDER_ALIASES.get(key, name)
-    p = _expand(path)
-    if not os.path.isdir(p):
+    key       = name.strip().lower().rstrip(".")
+    known_key = _FOLDER_ALIASES.get(key)
+
+    p = None
+    if known_key:
+        import winpaths
+        p = winpaths.get_known_folder(known_key)
+    if not p:
+        p = _expand(name)  # nome de pasta arbitrário digitado pelo usuário
+
+    if not p or not os.path.isdir(p):
         return f"❌ Não encontrei a pasta '{name}'."
     try:
         if IS_WIN:
@@ -790,6 +798,13 @@ def interpret_system_command(text: str) -> tuple[str, str] | None:
     m = re.search(r"(?:criar?|cria)\s+(?:uma?\s+)?pasta\s+(?:chamad[ao]\s+)?(.+)", t)
     if m:
         return ("create_folder", m.group(1).strip())
+
+    # ── Galeria flutuante (imagens / arquivos) — palavra isolada ──
+    t_clean = t.rstrip(".!? ")
+    if re.fullmatch(r"imagem|imagens|galeria|mostra\s+(?:minhas\s+)?imagens?|abre\s+(?:a\s+)?galeria(?:\s+de\s+imagens?)?", t_clean):
+        return ("gallery_images", "")
+    if re.fullmatch(r"arquivos?|mostra\s+(?:meus\s+)?arquivos|abre\s+(?:meus\s+)?arquivos", t_clean):
+        return ("gallery_files", "")
 
     # ── Abrir pasta conhecida (Downloads, Documentos, etc.) ──
     m = re.search(r"(?:abre|abrir|abra|mostra|mostrar)\s+(?:a\s+)?pasta\s+(?:de\s+)?(.+)", t)

@@ -240,6 +240,45 @@ def bump_daily_message_count(user: dict) -> tuple[int, int]:
     return count, limit
 
 
+# ── Planos Premium (Pix) ─────────────────────────────────────────────────
+def create_payment_receipt(fields: dict) -> dict:
+    r = requests.post(_url("payment_receipts"), headers=_headers(), json=fields, timeout=15)
+    r.raise_for_status()
+    return r.json()[0]
+
+
+def get_latest_receipt(user_id: str) -> Optional[dict]:
+    r = requests.get(
+        _url("payment_receipts"), headers=_headers(),
+        params={"user_id": f"eq.{user_id}", "select": "*", "order": "created_at.desc", "limit": 1},
+        timeout=15,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    return rows[0] if rows else None
+
+
+def list_pending_receipts(limit: int = 30) -> List[dict]:
+    r = requests.get(
+        _url("payment_receipts"), headers=_headers(),
+        params={"status": "eq.aguardando_confirmacao", "select": "*", "order": "created_at.asc", "limit": limit},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def update_receipt(receipt_id, fields: dict) -> None:
+    requests.patch(
+        _url("payment_receipts"), headers=_headers(),
+        params={"id": f"eq.{receipt_id}"}, json=fields, timeout=15,
+    )
+
+
+def set_user_plan(user_id: str, plan: str, plan_status: str) -> None:
+    update_user(user_id, {"plan": plan, "plan_status": plan_status})
+
+
 # ── Recuperação de senha por e-mail (via EmailJS REST API) ───────────────
 def send_reset_email(to_email: str, to_name: str, code: str) -> tuple[bool, str]:
     if not (EMAILJS_SERVICE_ID and EMAILJS_TEMPLATE_RESET and EMAILJS_PUBLIC_KEY):

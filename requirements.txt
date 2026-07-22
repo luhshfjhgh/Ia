@@ -27,3 +27,13 @@ cryptography>=42.0.0
 # ── Visao computacional (camera.py) ───────────────────────────────────
 opencv-python>=4.8.0
 ultralytics>=8.0.0
+
+# Galeria flutuante 3D (instalado automaticamente na 1a vez que for usada)
+# PyQt6
+# PyQt6-WebEngine
+
+# Sistema de Planos Premium — leitura de comprovantes
+pypdf>=4.0.0
+# pytesseract (opcional, para OCR de comprovantes em imagem — requer o
+# binario Tesseract-OCR instalado separadamente no Windows: 
+# https://github.com/UB-Mannheim/tesseract/wiki)

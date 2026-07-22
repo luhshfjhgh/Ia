@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent !important;
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+  }
+  #panel {
+    width: 100%; height: 100%;
+    background: rgba(16, 12, 26, 0.92);
+    border: 1px solid rgba(168, 100, 255, 0.25);
+    border-radius: 20px;
+    padding: 28px 26px;
+    display: flex; flex-direction: column; gap: 20px;
+    -webkit-backdrop-filter: blur(10px);
+  }
+  #headerRow { display: flex; justify-content: space-between; align-items: center; }
+  #title { color: #EDE6FF; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  #closeBtn {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(255,255,255,0.06); color: #cbb8ff;
+    border: 1px solid rgba(190,140,255,0.3);
+    font-size: 14px; line-height: 24px; text-align: center; cursor: pointer;
+  }
+  #closeBtn:hover { background: rgba(150,80,230,0.5); }
+  #cards { display: flex; gap: 18px; flex: 1; }
+  .card {
+    flex: 1;
+    background: linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    padding: 20px 18px;
+    display: flex; flex-direction: column;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .card:hover { transform: translateY(-3px); border-color: rgba(168,100,255,0.45); }
+  .card.pro { border-color: rgba(74,236,225,0.5); position: relative; }
+  .card.pro::before {
+    content: "MAIS POPULAR";
+    position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(90deg,#4AECE1,#20A591);
+    color: #06231f; font-size: 10px; font-weight: 800; letter-spacing: 0.08em;
+    padding: 3px 10px; border-radius: 20px;
+  }
+  .planName { color: #fff; font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+  .planPrice { font-size: 26px; font-weight: 800; margin-bottom: 14px; }
+  .planPrice.free { color: #c9bdf0; }
+  .planPrice.basic { color: #b98bff; }
+  .planPrice.pro {
+    background: linear-gradient(180deg, #EAFFFD, #4AECE1);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .benefits { list-style: none; margin: 0 0 18px 0; padding: 0; flex: 1; }
+  .benefits li {
+    color: #d8cdf2; font-size: 12.5px; margin-bottom: 9px;
+    padding-left: 18px; position: relative; line-height: 1.35;
+  }
+  .benefits li::before { content: "✓"; position: absolute; left: 0; color: #4AECE1; font-weight: 700; }
+  .btn {
+    border: none; border-radius: 10px; padding: 10px 0;
+    font-size: 13px; font-weight: 700; cursor: pointer; text-align: center;
+    font-family: inherit;
+  }
+  .btn.free { background: rgba(255,255,255,0.08); color: #e8e0ff; }
+  .btn.free:hover { background: rgba(255,255,255,0.14); }
+  .btn.paid {
+    background: linear-gradient(90deg, #9B5CFF, #6A2FD9);
+    color: #fff;
+  }
+  .btn.paid.pro { background: linear-gradient(90deg, #4AECE1, #1F9E96); color: #062521; }
+  .btn.paid:hover { filter: brightness(1.12); }
+</style>
+</head>
+<body>
+<div id="panel">
+  <div id="headerRow">
+    <div id="title">🚀 Planos Nox AI</div>
+    <div id="closeBtn" onclick="window.noxClose && window.noxClose()">✕</div>
+  </div>
+  <div id="cards"></div>
+</div>
+
+<!--NOX_DATA_INJECTION_POINT-->
+<script>
+const plans = window.NOX_PLANS || {};
+const cardsEl = document.getElementById("cards");
+
+const order = ["free", "basic", "pro"];
+order.forEach((key) => {
+  const p = plans[key];
+  if (!p) return;
+  const card = document.createElement("div");
+  card.className = "card" + (key === "pro" ? " pro" : "");
+  const btnClass = key === "free" ? "free" : ("paid" + (key === "pro" ? " pro" : ""));
+  const btnLabel = key === "free" ? "Usar Free" : `Assinar ${p.nome}`;
+  card.innerHTML = `
+    <div class="planName">${p.nome}</div>
+    <div class="planPrice ${key}">${p.preco_label}</div>
+    <ul class="benefits">${p.beneficios.map(b => `<li>${b}</li>`).join("")}</ul>
+    <button class="btn ${btnClass}" onclick="window.noxSelectPlan && window.noxSelectPlan('${key}')">${btnLabel}</button>
+  `;
+  cardsEl.appendChild(card);
+});
+
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape" && window.noxClose) window.noxClose();
+});
+</script>
+</body>
+</html>
