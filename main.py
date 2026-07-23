@@ -951,6 +951,35 @@ class NoxAI:
     #  TRADUTOR
     # ══════════════════════════════════════════
 
+    def _cmd_idioma(self):
+        """Escolhe se a Nox detecta o idioma sozinha (padrão) ou responde
+        sempre num idioma fixo, não importa o que o usuário escrever."""
+        opcoes = {
+            "1": ("auto",  "Automático — detecta e responde no idioma da mensagem"),
+            "2": ("pt-BR", "Português (sempre)"),
+            "3": ("en",    "Inglês (sempre)"),
+            "4": ("es",    "Espanhol (sempre)"),
+            "5": ("fr",    "Francês (sempre)"),
+            "6": ("de",    "Alemão (sempre)"),
+            "7": ("it",    "Italiano (sempre)"),
+            "8": ("ja",    "Japonês (sempre)"),
+        }
+        atual = self.config.get("language", "auto") or "auto"
+        print(f"\n  {C.CYAN}{C.BOLD}🌐 IDIOMA DE RESPOSTA{C.RESET}")
+        for k, (code, label) in opcoes.items():
+            marcador = f" {C.GREEN}✓{C.RESET}" if code == atual else ""
+            print(f"  {k}. {label}{marcador}")
+        try:
+            escolha = input("\n  Escolha: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if escolha not in opcoes:
+            self.print_nox("Opção inválida.")
+            return
+        code, label = opcoes[escolha]
+        self.config.set("language", code)
+        self.print_nox(f"Idioma definido: {label} ✓")
+
     def _cmd_traduzir(self):
         idiomas = {
             "1": ("inglês", "English"), "2": ("espanhol", "Spanish"),
@@ -1600,6 +1629,28 @@ class NoxAI:
     #  API
     # ══════════════════════════════════════════
 
+    def _language_instruction(self) -> str:
+        """
+        Monta a instrução de idioma pro modelo. Por padrão ("auto"), a
+        Nox detecta sozinha o idioma da mensagem do usuário e responde
+        no mesmo idioma — sem precisar configurar nada. O usuário pode
+        forçar um idioma fixo com /idioma.
+        """
+        lang_cfg = self.config.get("language", "auto")
+        if not lang_cfg or lang_cfg == "auto":
+            return (
+                "Detecte automaticamente o idioma da mensagem mais recente do usuário "
+                "e responda SEMPRE nesse mesmo idioma (português, inglês, espanhol, etc.), "
+                "mesmo que o restante da conversa tenha sido em outro idioma. Se o idioma "
+                "não ficar claro, responda em português brasileiro."
+            )
+        nomes = {
+            "pt-BR": "português brasileiro", "en": "inglês", "es": "espanhol",
+            "fr": "francês", "de": "alemão", "it": "italiano", "ja": "japonês",
+        }
+        nome = nomes.get(lang_cfg, lang_cfg)
+        return f"Responda SEMPRE em {nome}, independente do idioma que o usuário usar."
+
     def _build_system_prompt(self, dev_system_prompt: str | None = None) -> str:
         # ── Modo NOX AI Developer Edition (DeepSeek Coder V2) ──────────
         # Quando a seleção automática de modelo detecta um pedido de
@@ -1612,7 +1663,8 @@ class NoxAI:
             name_l = f" O nome do usuário é {self.user_name}." if self.user_name else ""
             return (
                 f"{dev_system_prompt}"
-                f"{name_l} Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}."
+                f"{name_l} Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}. "
+                f"{self._language_instruction()}"
             )
 
         p       = PERSONALITIES.get(self.personality, PERSONALITIES["sarcastica"])
@@ -1625,7 +1677,7 @@ class NoxAI:
         return (
             f"Você é Nox, assistente de terminal criada pela Neurocode / WR Programação. "
             f"{p['prompt']}{mood_l}{night_l} "
-            f"{name_l}Responda em português brasileiro, natural e conciso. "
+            f"{name_l}{self._language_instruction()} "
             f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}."
             f"{facts_l}{focus_l}"
         )
@@ -2063,6 +2115,7 @@ class NoxAI:
             "/calc":           self._cmd_calc,
             "/clima":          self._cmd_clima,
             "/traduzir":       self._cmd_traduzir,
+            "/idioma":         self._cmd_idioma,
             "/noturno":        self._cmd_noturno,
             "/alias":          self._cmd_alias,
             "/streak":         self._cmd_streak,
@@ -2376,6 +2429,7 @@ class NoxAI:
 {C.WHITE}  /calc        {C.GRAY}— Calculadora científica
 {C.WHITE}  /clima       {C.GRAY}— Clima de uma cidade
 {C.WHITE}  /traduzir    {C.GRAY}— Traduz texto via IA
+{C.WHITE}  /idioma      {C.GRAY}— Escolhe se a Nox responde no idioma detectado (padrão) ou num idioma fixo
 {C.WHITE}  /ip          {C.GRAY}— IP local e público
 {C.WHITE}  /relogio     {C.GRAY}— Relógio em tempo real
 {C.WHITE}  /ascii       {C.GRAY}— Arte ASCII de texto

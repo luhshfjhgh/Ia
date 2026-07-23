@@ -27,7 +27,7 @@ DEFAULTS: dict = {
     "tts_voice":            "pt-BR-FranciscaNeural",
     "max_history_context":  20,
     "typing_delay":         0.018,
-    "language":             "pt-BR",
+    "language":             "auto",
     "show_timestamps":      False,
     "auto_save_interval":   10,
     "tts_speed":            "normal",

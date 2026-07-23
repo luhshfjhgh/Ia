@@ -209,30 +209,45 @@ def _call_gemini(messages: List[Dict], system: str, max_tokens: int, temperature
 
 # ── Chamada principal (síncrona) ───────────────────────────────────
 def call_grok(
-    messages:    List[Dict[str, str]],
-    system:      str   = "",
-    max_tokens:  int   = 8000,
-    temperature: float = 0.7,
-    model:       str   = "",
+    messages:      List[Dict[str, str]],
+    system:        str   = "",
+    max_tokens:    int   = 8000,
+    temperature:   float = 0.7,
+    model:         str   = "",
+    prefer_ollama: bool  = False,
 ) -> str:
     """
     Tenta os backends nesta ordem:
-      1. Groq (NOX_API_KEY no .env)
-      2. Ollama local (se rodando)
-      3. Google Gemini (GEMINI_API_KEY no .env)
-      4. Mensagem de erro informativa
+      Padrão:        1. Groq  2. Ollama local  3. Gemini  4. erro
+      prefer_ollama: 1. Ollama local (DeepSeek Coder V2)  2. Groq  3. Gemini  4. erro
+
+    prefer_ollama=True é usado pelo modo "NOX AI Developer Edition"
+    (criação de sites/apps), para garantir que o DeepSeek Coder V2
+    rodando localmente via Ollama seja usado antes de qualquer API
+    online.
     """
     _check_rate()
 
-    # 1. Groq / OpenAI-compatible
-    result = _call_groq(messages, system, max_tokens, temperature, model)
-    if result is not None:
-        return result
+    if prefer_ollama:
+        # 1. Ollama local (DeepSeek Coder V2)
+        result = _call_ollama(messages, system, max_tokens)
+        if result is not None:
+            return result
 
-    # 2. Ollama local
-    result = _call_ollama(messages, system, max_tokens)
-    if result is not None:
-        return result
+        # 2. Groq / OpenAI-compatible (fallback se Ollama não estiver rodando)
+        result = _call_groq(messages, system, max_tokens, temperature, model)
+        if result is not None:
+            return result
+    else:
+        # 1. Groq / OpenAI-compatible
+        result = _call_groq(messages, system, max_tokens, temperature, model)
+        if result is not None:
+            return result
+
+        # 2. Ollama local
+        result = _call_ollama(messages, system, max_tokens)
+        if result is not None:
+            return result
 
     # 3. Gemini
     result = _call_gemini(messages, system, max_tokens, temperature)
@@ -242,30 +257,32 @@ def call_grok(
     # 4. Fallback informativo
     return (
         "[NOX AI] Nenhum backend de IA disponível. Verifique:\n"
-        "  • NOX_API_KEY no .env (Groq — já configurado)\n"
-        "  • Ollama rodando localmente\n"
+        "  • Ollama rodando localmente (ollama serve) com deepseek-coder-v2 baixado\n"
+        "  • NOX_API_KEY no .env (Groq)\n"
         "  • GEMINI_API_KEY no .env (Google)"
     )
 
 
 # ── Chamada assíncrona ─────────────────────────────────────────────
 async def call_grok_async(
-    messages:    List[Dict[str, str]],
-    system:      str   = "",
-    max_tokens:  int   = 8000,
-    temperature: float = 0.7,
+    messages:      List[Dict[str, str]],
+    system:        str   = "",
+    max_tokens:    int   = 8000,
+    temperature:   float = 0.7,
+    prefer_ollama: bool  = False,
 ) -> str:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
-        lambda: call_grok(messages, system, max_tokens, temperature),
+        lambda: call_grok(messages, system, max_tokens, temperature, prefer_ollama=prefer_ollama),
     )
 
 
 # ── Helper rápido ──────────────────────────────────────────────────
-async def quick_prompt(prompt: str, system: str = "", max_tokens: int = 4000) -> str:
+async def quick_prompt(prompt: str, system: str = "", max_tokens: int = 4000, prefer_ollama: bool = False) -> str:
     return await call_grok_async(
         messages=[{"role": "user", "content": prompt}],
         system=system,
         max_tokens=max_tokens,
+        prefer_ollama=prefer_ollama,
     )

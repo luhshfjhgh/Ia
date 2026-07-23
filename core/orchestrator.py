@@ -183,7 +183,7 @@ Seja preciso, eficiente e entregue resultados de alta qualidade."""
             f"Qual(is) time(s) deve(m) tratar essa solicitação? "
             f"Responda SOMENTE com os nomes dos times separados por vírgula."
         )
-        resp = await quick_prompt(prompt, max_tokens=100)
+        resp = await quick_prompt(prompt, max_tokens=100, prefer_ollama=True)
         teams = [t.strip().lower() for t in resp.split(",") if t.strip().lower() in self._teams]
         if not teams:
             teams = ["software"]  # fallback
@@ -203,7 +203,7 @@ Seja preciso, eficiente e entregue resultados de alta qualidade."""
             f"Formato: {{\"web\": \"criar o frontend...\", \"software\": \"criar a API...\"}}\n"
             f"Responda SOMENTE com o JSON válido."
         )
-        resp = await quick_prompt(prompt, max_tokens=500)
+        resp = await quick_prompt(prompt, max_tokens=500, prefer_ollama=True)
         try:
             # Limpar possíveis blocos de código
             clean = resp.strip()
@@ -262,7 +262,7 @@ Todos os textos do site: título principal, subtítulo, seções, parágrafos, c
 
 Responda em português brasileiro."""
 
-        resp1 = await quick_prompt(prompt1, max_tokens=3000)
+        resp1 = await quick_prompt(prompt1, max_tokens=3000, prefer_ollama=True)
         gm.update_project(project_id, "plan", resp1)
         gm.add_project_file(project_id, "planejamento.md", resp1)
 
@@ -304,7 +304,7 @@ INSTRUÇÕES:
 
 Responda SOMENTE com o código HTML completo, começando com <!DOCTYPE html>"""
 
-        html_content = await quick_prompt(prompt2, max_tokens=8000)
+        html_content = await quick_prompt(prompt2, max_tokens=8000, prefer_ollama=True)
 
         # Limpa bloco de código se vier com ```
         html_clean = html_content.strip()
@@ -337,7 +337,7 @@ Depois, separado por ===README===, crie um README.md profissional com:
 - Estrutura de arquivos
 - Como abrir (abrir index.html no navegador)"""
 
-        resp3 = await quick_prompt(prompt3, max_tokens=3000)
+        resp3 = await quick_prompt(prompt3, max_tokens=3000, prefer_ollama=True)
 
         js_content = resp3
         readme_content = ""
@@ -385,7 +385,7 @@ Depois, separado por ===README===, crie um README.md profissional com:
             f"lista de páginas/componentes, paleta de cores sugerida.\n"
             f"Seja específico e prático."
         )
-        plan = await quick_prompt(plan_prompt, system=self.SYSTEM_PROMPT, max_tokens=1000)
+        plan = await quick_prompt(plan_prompt, system=self.SYSTEM_PROMPT, max_tokens=1000, prefer_ollama=True)
         gm.update_project(project_id, "plan", plan)
         await asyncio.sleep(4)
 
@@ -473,6 +473,7 @@ Depois, separado por ===README===, crie um README.md profissional com:
             f"Crie um README.md profissional para o projeto: {user_input}\n"
             f"Inclua: descrição, tecnologias, estrutura de pastas, como rodar.",
             max_tokens=800,
+            prefer_ollama=True,
         )
         gm.add_project_file(project_id, "README.md", readme)
         results["readme"] = readme
@@ -578,6 +579,7 @@ Depois, separado por ===README===, crie um README.md profissional com:
                     f"Consolide em resposta única coerente em português.",
                     system=self.SYSTEM_PROMPT,
                     max_tokens=3000,
+                    prefer_ollama=True,
                 )
 
         orch_task.final_output = result
